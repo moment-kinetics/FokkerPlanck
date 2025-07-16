@@ -1,5 +1,5 @@
 # Based on example from https://github.com/julia-actions/julia-runtest
-name: Run tests
+name: Run plotting scripts
 
 on: [pull_request, push, workflow_dispatch]
 
