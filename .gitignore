@@ -1,0 +1,11 @@
+Manifest.toml
+LocalPreferences.toml
+/julia.env
+/.julia
+/bin
+.DS_Store
+*.pdf
+*.out
+*.err
+*.h5
+*.py
