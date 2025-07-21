@@ -36,6 +36,7 @@ export init_fokker_planck_collisions
 # testing
 export fokker_planck_collision_operator_weak_form!
 export fokker_planck_self_collision_operator_weak_form!
+export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 export calculate_entropy_production
 # implicit advance
 export fokker_planck_self_collisions_backward_euler_step!
@@ -194,6 +195,29 @@ function fokker_planck_collision_operator_weak_form!(
     return nothing
 end
 
+function fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(
+                        ffs_in::AbstractArray{mk_float,2},
+                        nuref::mk_float, ms::mk_float, Zs::mk_float,
+                        msp::Array{mk_float,1}, Zsp::Array{mk_float,1},
+                        densp::Array{mk_float,1}, uparsp::Array{mk_float,1},
+                        vthsp::Array{mk_float,1},
+                        fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                        use_conserving_corrections=true::Bool)
+
+    fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(ffs_in,
+        nuref,ms,Zs,msp,Zsp,densp,uparsp,vthsp,
+        fkpl_arrays)
+    if use_conserving_corrections
+        vpa = fkpl_arrays.vpa
+        vperp = fkpl_arrays.vperp
+        # enforce the boundary conditions on CC before it is used for timestepping
+        enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
+        # make ad-hoc conserving corrections
+        density_conserving_correction!(fkpl_arrays.CC,ffs_in,vpa,vperp)
+    end
+    return nothing
+end
+
 """
 Function for computing the collision operator
 ```math
@@ -205,7 +229,8 @@ the corresponding Rosenbluth potentials
 are specified using analytical results.
 """
 function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(
-                         ffs_in, nuref::mk_float, ms::mk_float, Zs::mk_float,
+                         ffs_in::AbstractArray{mk_float,2},
+                         nuref::mk_float, ms::mk_float, Zs::mk_float,
                          msp::Array{mk_float,1}, Zsp::Array{mk_float,1},
                          densp::Array{mk_float,1}, uparsp::Array{mk_float,1},
                          vthsp::Array{mk_float,1},

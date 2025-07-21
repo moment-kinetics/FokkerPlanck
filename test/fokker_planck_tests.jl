@@ -14,7 +14,7 @@ using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansi
 
 using FokkerPlanck: init_fokker_planck_collisions, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!
-using FokkerPlanck: density_conserving_correction!, fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!
+using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 using FokkerPlanck: fokker_planck_self_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, F_Beam
@@ -933,15 +933,10 @@ function runtests()
                         end
                     end
                 end
-                @views fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(Fs_M,
+                fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(Fs_M,
                                      nuref,mref,Zref,msp,Zsp,denssp,uparsp,vthsp,
-                                     fkpl_arrays)
-                if test_numerical_conserving_terms
-                    # enforce the boundary conditions on CC before it is used for timestepping
-                    enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
-                    # make ad-hoc conserving corrections
-                    density_conserving_correction!(fkpl_arrays.CC,Fs_M,vpa,vperp)
-                end
+                                     fkpl_arrays;
+                                     use_conserving_corrections=test_numerical_conserving_terms)
                 # extract C[Fs,Fs'] result
                 @inbounds begin
                     for ivperp in 1:vperp.n
