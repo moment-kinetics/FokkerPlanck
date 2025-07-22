@@ -154,6 +154,17 @@ struct scalar_coordinate_inputs
 end
 
 """
+enum for boundary conditions imposed
+on the evolved solution.
+"""
+@enum finite_element_boundary_condition_type begin
+    # boundary condition imposed by structure of FE matrices
+    natural_boundary_condition
+    # Zero boundary conditions are imposed on the FE matrices and the solution
+    zero_boundary_condition
+end
+
+"""
 structure containing basic information related to coordinates
 """
 struct finite_element_coordinate
@@ -180,7 +191,7 @@ struct finite_element_coordinate
     # igrid_full[i,j] contains the index of the full grid for the elemental grid point i, on element j
     igrid_full::Array{mk_int,2}
     # bc is the boundary condition option for this coordinate
-    bc::String
+    bc::finite_element_boundary_condition_type
     # wgts contains the integration weights associated with each grid point
     wgts::Array{mk_float,1}
     # scale for each element
@@ -208,7 +219,7 @@ struct finite_element_coordinate
         # option for spacing between element boundaries
         element_spacing_option="uniform"::String,
         # which boundary condition to use
-        bc="none"::String)
+        bc=natural_boundary_condition::finite_element_boundary_condition_type)
         ngrid = scalar_input.ngrid
         nelement = scalar_input.nelement
         Ldomain = scalar_input.Ldomain
@@ -256,7 +267,7 @@ struct finite_element_coordinate
         # from which the coordinate struct can be created
         element_data::Union{Array{element_coordinates,1},Nothing};
         # which boundary condition to use
-        bc="none"::String)
+        bc=natural_boundary_condition::finite_element_boundary_condition_type)
         if typeof(element_data) == Nothing
             # this is a trivial coordinate of length 1
             nelement = 1

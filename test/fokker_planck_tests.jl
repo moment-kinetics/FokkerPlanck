@@ -7,7 +7,9 @@ export backward_Euler_fokker_planck_self_collisions_test
 
 using LinearAlgebra: mul!, ldiv!
 using FokkerPlanck.array_allocation: allocate_float
-using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs
+using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs,
+                                finite_element_boundary_condition_type,
+                                natural_boundary_condition, zero_boundary_condition
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole
@@ -28,7 +30,7 @@ using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_coll
                                             fokkerplanck_arrays_direct_integration_struct
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
-                      Lvpa=12.0,Lvperp=6.0,bc_vpa="zero",bc_vperp="zero")
+                      Lvpa=12.0,Lvperp=6.0,bc_vpa=zero_boundary_condition,bc_vperp=zero_boundary_condition)
 
         # create the 'input' struct containing input info needed to create a
         # coordinate
@@ -59,8 +61,8 @@ function backward_Euler_linearised_collisions_test(;
                 ngrid = 5,
                 nelement_vpa = 16,
                 nelement_vperp = 8,
-                bc_vpa="none",
-                bc_vperp="none",
+                bc_vpa=natural_boundary_condition,
+                bc_vperp=natural_boundary_condition,
                 ms = 1.0,
                 delta_t = 1.0,
                 nuss = 1.0,
@@ -172,11 +174,11 @@ function diagnose_F_Maxwellian(pdf,pdf_exact,pdf_dummy_1,pdf_dummy_2,vpa,vperp,t
     println("dens: ", dens)
     println("upar: ", upar)
     println("vth: ", vth)
-    if vpa.bc == "zero"
+    if vpa.bc == zero_boundary_condition
         println("test vpa bc: F[1, :]", pdf[1, :])
         println("test vpa bc: F[end, :]", pdf[end, :])
     end
-    if vperp.bc == "zero"
+    if vperp.bc == zero_boundary_condition
         println("test vperp bc: F[:, end]", pdf[:, end])
     end
     return nothing
@@ -202,8 +204,8 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     nelement_vperp=8,
     Lvpa=10.0,
     Lvperp=5.0,
-    bc_vpa="none",
-    bc_vperp="none",
+    bc_vpa=natural_boundary_condition,
+    bc_vperp=natural_boundary_condition,
     # timestepping parameters
     ntime=100,
     delta_t=1.0,
@@ -237,13 +239,13 @@ function backward_Euler_fokker_planck_self_collisions_test(;
             end
         end
     end
-    if vpa.bc == "zero"
+    if vpa.bc == zero_boundary_condition
         @inbounds for ivperp in 1:vperp.n
             Fold[1,ivperp] = 0.0
             Fold[end,ivperp] = 0.0
         end
     end
-    if vperp.bc == "zero"
+    if vperp.bc == zero_boundary_condition
         @inbounds for ivpa in 1:vpa.n
             Fold[ivpa,end] = 0.0
         end
@@ -474,7 +476,7 @@ function runtests()
         println("Fokker Planck tests")
         @testset "backward-Euler nonlinear Fokker-Planck collisions" begin
             println("    - test backward-Euler nonlinear Fokker-Planck collisions")
-            @testset "$bc" for bc in ("none", "zero")  
+            @testset "$bc" for bc in (natural_boundary_condition, zero_boundary_condition)  
                 println("        -  bc=$bc")
                 # here test that a Maxwellian initial condition remains Maxwellian,
                 # i.e., we check the numerical Maxwellian is close to the analytical one.
@@ -1070,7 +1072,7 @@ function runtests()
         
         @testset "backward-Euler linearised test particle collisions" begin
             println("    - test backward-Euler linearised test particle collisions")
-            @testset "$bc" for bc in ("none", "zero")  
+            @testset "$bc" for bc in (natural_boundary_condition, zero_boundary_condition)  
                 println("        -  bc=$bc")
                 backward_Euler_linearised_collisions_test(bc_vpa=bc,bc_vperp=bc,
                  use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=true)

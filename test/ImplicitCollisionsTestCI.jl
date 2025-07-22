@@ -76,7 +76,7 @@ atol = 1.0e-13
         println("    - test Gauss Legendre")
         for test_input_array_type in (true,false)
             output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-            vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
+            vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
                 ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
                 test_external_chebyshev_grid=false, continuous_integration_test=true,
                 test_input_array_type=test_input_array_type)
@@ -90,7 +90,7 @@ atol = 1.0e-13
     @testset "Gauss Chebyshev" begin
         println("    - test Gauss Chebyshev")
         output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-           vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
+           vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
             test_external_chebyshev_grid=true, continuous_integration_test=true)
         @test isapprox(expected_chebyshev.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)

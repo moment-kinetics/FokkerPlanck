@@ -73,7 +73,6 @@ end
         algebraic_solve_for_d2Gdvperp2=false,
         boundary_data_option=direct_integration)
         
-        bc = "none"
         element_spacing_option = "uniform"
         println("made inputs")
         println("vpa: ngrid: ",ngrid," nelement: ",nelement_vpa, " Lvpa: ",Lvpa)
@@ -82,13 +81,11 @@ end
         vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
                                     nelement_vperp,
                                     Lvperp),
-                                    element_spacing_option=element_spacing_option,
-                                    bc=bc)
+                                    element_spacing_option=element_spacing_option)
         vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
                                     nelement_vpa,
                                     Lvpa),
-                                    element_spacing_option=element_spacing_option,
-                                    bc=bc)
+                                    element_spacing_option=element_spacing_option)
         nc_global = vpa.n*vperp.n
         start_init_time = now()
         fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option)

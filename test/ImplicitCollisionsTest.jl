@@ -16,7 +16,8 @@ function test_implicit_collisions(;
     ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
     Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
     # boundary condition info
-    bc_vpa="none"::String, bc_vperp="none"::String,
+    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
     # time advance info
     ntime=1::mk_int,delta_t=1.0::mk_float,
     # nonlinear solver options
@@ -138,10 +139,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     Pkg.activate(".")
     # run once to precompile
     test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-    vth0=0.5,vperp0=1.0,vpa0=1.0, nelement_vpa=4,nelement_vperp=2,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
-     ntime=1, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
+        vth0=0.5,vperp0=1.0,vpa0=1.0, nelement_vpa=4,nelement_vperp=2,Lvpa=8.0,Lvperp=4.0,
+        bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
+        ntime=1, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
     # run a standard case now we are precompiled
     test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-    vth0=0.5,vperp0=1.0,vpa0=1.0, nelement_vpa=32,nelement_vperp=16,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
-     ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
+        vth0=0.5,vperp0=1.0,vpa0=1.0, nelement_vpa=32,nelement_vperp=16,Lvpa=8.0,Lvperp=4.0,
+        bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
+        ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
 end
