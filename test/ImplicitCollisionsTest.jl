@@ -94,7 +94,7 @@ function test_implicit_collisions(;
     for it in 1:ntime
         # use Fold = F^n to obtain Fnew = F^n+1 for n = it 
         fokker_planck_self_collisions_backward_euler_step!(Fold, delta_t, ms, nuss, fkpl_arrays,
-            test_numerical_conserving_terms=test_numerical_conserving_terms,
+            use_conserving_corrections=test_numerical_conserving_terms,
             test_particle_preconditioner=test_particle_preconditioner,
             test_linearised_advance=test_linearised_advance,
             use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)

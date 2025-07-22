@@ -105,7 +105,7 @@ end
 function fokker_planck_self_collision_operator_weak_form!(
                          pdf_in::AbstractArray{mk_float,2}, ms::mk_float, nuss::mk_float,
                          fkpl_arrays::fokkerplanck_weakform_arrays_struct;
-                         use_conserving_corrections=false::Bool)
+                         use_conserving_corrections=true::Bool)
     # first argument is Fs, and second argument is Fs' in C[Fs,Fs'] 
     @views fokker_planck_collision_operator_weak_form!(
         pdf_in, pdf_in, ms, ms, nuss, fkpl_arrays)
@@ -351,7 +351,7 @@ end
 function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{mk_float,2},
                         delta_t::mk_float, ms::mk_float, nuss::mk_float,
                         fkpl_arrays::fokkerplanck_weakform_arrays_struct;
-                        test_numerical_conserving_terms=false::Bool,
+                        use_conserving_corrections=true::Bool,
                         test_linearised_advance=false::Bool,
                         test_particle_preconditioner=true::Bool,
                         use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool)
@@ -365,7 +365,7 @@ function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{
         fokker_planck_self_collision_operator_weak_form!(
                         Fnew, ms, nuss,
                         fkpl_arrays; 
-                        use_conserving_corrections=test_numerical_conserving_terms)
+                        use_conserving_corrections=use_conserving_corrections)
 
         @inbounds begin
             for ivperp in 1:vperp.n
@@ -422,7 +422,7 @@ function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{
         # apply BCs on result, if non-natural BCs are imposed
         # should only introduce error of order ~ atol
         enforce_vpavperp_BCs!(Fnew,vpa,vperp)
-        if test_numerical_conserving_terms
+        if use_conserving_corrections
             # ad-hoc end-of-step corrections, again introducing only ~atol error
             deltaF = fkpl_arrays.rhsvpavperp
             @inbounds begin
