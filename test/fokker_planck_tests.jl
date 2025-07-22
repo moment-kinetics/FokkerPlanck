@@ -288,7 +288,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     end
     for it in 1:ntime
         fokker_planck_self_collisions_backward_euler_step!(Fold, delta_t, ms, nuss, fkpl_arrays,
-            test_numerical_conserving_terms=test_numerical_conserving_terms,
+            use_conserving_corrections=test_numerical_conserving_terms,
             test_particle_preconditioner=test_particle_preconditioner,
             test_linearised_advance=test_linearised_advance,
             use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
