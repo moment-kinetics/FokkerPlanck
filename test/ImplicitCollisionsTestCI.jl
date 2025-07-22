@@ -74,14 +74,17 @@ atol = 1.0e-13
     println("Test implicit collisions demo script")
     @testset "Gauss Legendre" begin
         println("    - test Gauss Legendre")
-        output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-           vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
-            ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
-            test_external_chebyshev_grid=false, continuous_integration_test=true)
-        @test isapprox(expected_gausslegendre.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
-        @test isapprox(expected_gausslegendre.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
-        for it in 1:2
-            @test isapprox(expected_gausslegendre.pdf[:,:,it], output_pdf_and_grid.pdf[:,:,it], atol=atol)
+        for test_input_array_type in (true,false)
+            output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
+            vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa="none", bc_vperp="none",
+                ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
+                test_external_chebyshev_grid=false, continuous_integration_test=true,
+                test_input_array_type=test_input_array_type)
+            @test isapprox(expected_gausslegendre.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
+            @test isapprox(expected_gausslegendre.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
+            for it in 1:2
+                @test isapprox(expected_gausslegendre.pdf[:,:,it], output_pdf_and_grid.pdf[:,:,it], atol=atol)
+            end
         end
     end
     @testset "Gauss Chebyshev" begin

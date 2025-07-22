@@ -30,7 +30,9 @@ function test_implicit_collisions(;
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
     # if ci test, return initial and final pdfs for regression testing
-    continuous_integration_test=false::Bool)
+    continuous_integration_test=false::Bool,
+    # if external user, may pass a slice of an array into functions
+    test_input_array_type=false::Bool)
     
     start_init_time = now()
     # group integer inputs using `scalar_coordinate_inputs` from FokkerPlanck.coordinates
@@ -60,7 +62,12 @@ function test_implicit_collisions(;
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # arrays needed for advance
-    Fold = allocate_float(vpa.n,vperp.n)
+    if test_input_array_type
+        Fgeneral = allocate_float(vpa.n,vperp.n,1,1,1)
+        @views Fold = Fgeneral[:,:,1,1,1]
+    else
+        Fold = allocate_float(vpa.n,vperp.n)
+    end
     # dummy arrays needed for diagnostics
     Fout = allocate_float(vpa.n,vperp.n,2)
     Fdummy1 = allocate_float(vpa.n,vperp.n)

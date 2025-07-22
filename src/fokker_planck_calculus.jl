@@ -2011,8 +2011,9 @@ without allocation. Use the exact results for the part of F that can be describe
 a Maxwellian, and the multipole expansion for the remainder.
 """
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
-    pdf::Tpdf,dummy_vpavperp::Tpdf,vpa::finite_element_coordinate,vperp::finite_element_coordinate;
-    calculate_GG=false,calculate_dGdvperp=false) where Tpdf <: AbstractArray{mk_float,2}
+    pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate;
+    calculate_GG=false,calculate_dGdvperp=false)
 
     mass = 1.0
     dens = get_density(pdf, vpa, vperp)
@@ -2632,7 +2633,7 @@ in weak form. Once the array `rhsvpavperp` contains the assembled weak-form coll
 a mass matrix solve still must be carried out to find the time derivative of the distribution function
 due to collisions.
 """
-function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::Tpdf,pdfs::Tpdf,
+function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::Tpdf,pdfs::AbstractArray{mk_float,2},
     d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,d2Gspdvperp2::Tpdf,
     dHspdvpa::Tpdf,dHspdvperp::Tpdf,ms::mk_float,msp::mk_float,nussp::mk_float,
     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
@@ -2830,7 +2831,7 @@ to solve the PDE matrix equations.
 """
 function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
              HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,dGdvperp::Tpdf,
-             d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::Tpdf,
+             d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
              fkpl_arrays::fokkerplanck_weakform_arrays_struct;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
