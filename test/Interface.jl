@@ -48,26 +48,22 @@ ngrid = 5
 nelement_global_vperp = 2
 Lvperp = 3.0
 element_spacing_option="uniform"
-bc_vperp="none"
 
 nelement_global_vpa = 4
 Lvpa = 6.0
-bc_vpa="none"
 # create the coordinate structs
 vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
                             nelement_global_vperp,
                             Lvperp),
-                            element_spacing_option=element_spacing_option,
-                            bc=bc_vperp)
+                            element_spacing_option=element_spacing_option)
 vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
                             nelement_global_vpa,
                             Lvpa),
-                            element_spacing_option=element_spacing_option,
-                            bc=bc_vpa)
+                            element_spacing_option=element_spacing_option)
 
 
-vperpnew = finite_element_coordinate("vperp",vperp.element_data, bc=bc_vperp)
-vpanew = finite_element_coordinate("vpa",vpa.element_data, bc=bc_vpa)
+vperpnew = finite_element_coordinate("vperp",vperp.element_data)
+vpanew = finite_element_coordinate("vpa",vpa.element_data)
 
 
 @testset "coordinate creation" begin

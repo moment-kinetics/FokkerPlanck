@@ -57,20 +57,17 @@ function init_grids(nelement,ngrid)
     # define inputs needed for the test
     Lvpa = 12.0 #physical box size in reference units 
     Lvperp = 6.0 #physical box size in reference units 
-    bc = "zero" 
     
     element_spacing_option = "uniform"
     # create the coordinate structs
     vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
                                 nelement,
                                 Lvperp),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
     vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
                                 nelement,
                                 Lvpa),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
     return vpa, vperp
 end
 

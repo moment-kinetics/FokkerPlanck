@@ -2,7 +2,9 @@ module CalculusTests
 
 using Test: @testset, @test
 using StableRNGs
-using FokkerPlanck.coordinates: finite_element_coordinate, first_derivative!, scalar_coordinate_inputs
+using FokkerPlanck.coordinates: finite_element_coordinate,
+                            first_derivative!,
+                            scalar_coordinate_inputs
 using FokkerPlanck.calculus: integral
 using LinearAlgebra: mul!, ldiv!
 
@@ -23,11 +25,9 @@ function runtests()
                 etol = 1.0e-14
                 element_spacing_option = "uniform"
                 L = 6.0
-                bc = "none"
                 # create the coordinate struct 'x'
                 x = finite_element_coordinate("coord", scalar_coordinate_inputs(ngrid,
                                      nelement, L),
-                                     bc=bc,
                                      element_spacing_option=element_spacing_option)
                 # create array for the function f(x) to be differentiated/integrated
                 f = Array{Float64,1}(undef, x.n)
@@ -57,16 +57,13 @@ function runtests()
         rng = StableRNG(42)
 
         @testset "GaussLegendre pseudospectral derivatives (4 argument), testing exact polynomials" verbose=false begin
-            @testset "$nelement $ngrid" for bc ∈ ("constant", "zero"),
-                    nelement ∈ (1:5), ngrid ∈ (3:17)
+            @testset "$nelement $ngrid" for nelement ∈ (1:5), ngrid ∈ (3:17)
                     
                 # define inputs needed for the test
                 L = 1.0
-                bc = "constant"
                 # create the coordinate struct 'x'
                 x = finite_element_coordinate("coord", scalar_coordinate_inputs(ngrid,
                                       nelement, L),
-                                      bc=bc,
                                       element_spacing_option="uniform")
                 # test polynomials up to order ngrid-1
                 for n ∈ 0:ngrid-1

@@ -32,7 +32,8 @@ export interpolate_2D_vspace!
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..calculus: integral
-using ..coordinates: first_derivative!, finite_element_coordinate
+using ..coordinates: first_derivative!, finite_element_coordinate,
+                    finite_element_boundary_condition_type, zero_boundary_condition
 using ..velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using ..fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
@@ -519,9 +520,6 @@ struct fokkerplanck_weakform_arrays_struct
                                                 nl_solver_rtol=0.0::mk_float,
                                                 nl_solver_nonlinear_max_iterations=20::mk_int,
                                                 print_to_screen=true::Bool)
-        if vperp.bc == "zero-impose-regularity"
-            error("vperp.bc = $(vperp.bc) not supported for implicit FP")
-        end
         bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
         if vperp.n > 1 && boundary_data_option == direct_integration
             init_Rosenbluth_potential_boundary_integration_weights!(bwgt.G0_weights, bwgt.G1_weights, bwgt.H0_weights, bwgt.H1_weights,
@@ -2533,8 +2531,8 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
             end
         end
         impose_BC_at_zero_vperp=false
-        zero_vpa_bc = vpa.bc == "zero"
-        zero_vperp_bc = vperp.bc == "zero"
+        zero_vpa_bc = vpa.bc == zero_boundary_condition
+        zero_vperp_bc = vperp.bc == zero_boundary_condition
         # only support zero bc
         if zero_vpa_bc || zero_vperp_bc
             # loop over elements
@@ -3071,7 +3069,7 @@ function enforce_vpavperp_BCs!(pdf::AbstractArray{mk_float,2},
     nvperp = vperp.n
     # vpa non-natural boundary conditions
     # zero at infinity
-    if vpa.bc == "zero"
+    if vpa.bc == zero_boundary_condition
         @inbounds for ivperp in 1:vperp.n
             pdf[1,ivperp] = 0.0
             pdf[nvpa,ivperp] = 0.0
@@ -3079,7 +3077,7 @@ function enforce_vpavperp_BCs!(pdf::AbstractArray{mk_float,2},
     end
     # vperp non-natural boundary conditions
     # zero boundary condition at infinity
-    if vperp.bc == "zero"
+    if vperp.bc == zero_boundary_condition
         @inbounds for ivpa in 1:vpa.n
             pdf[ivpa,nvperp] = 0.0
         end

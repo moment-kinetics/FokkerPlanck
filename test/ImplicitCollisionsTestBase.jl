@@ -1,7 +1,12 @@
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck: calculate_entropy_production
-using FokkerPlanck.coordinates: scalar_coordinate_inputs, set_element_boundaries, set_element_scale_and_shift, finite_element_coordinate
+using FokkerPlanck.coordinates: scalar_coordinate_inputs,
+                            set_element_boundaries,
+                            set_element_scale_and_shift,
+                            finite_element_coordinate,
+                            finite_element_boundary_condition_type,
+                            zero_boundary_condition, natural_boundary_condition
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_qpar, get_rmom
 using FiniteElementMatrices: element_coordinates
@@ -42,11 +47,11 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
     println("rmom: ", rmom)
     dSdt = calculate_entropy_production(pdf,fkpl_arrays)
     println("dSdt: ", dSdt)
-    if vpa.bc == "zero"
+    if vpa.bc == zero_boundary_condition
         println("test vpa bc: F[1, :]", pdf[1, :])
         println("test vpa bc: F[end, :]", pdf[end, :])
     end
-    if vperp.bc == "zero"
+    if vperp.bc == zero_boundary_condition
         println("test vperp bc: F[:, end]", pdf[:, end])
     end
 end
@@ -109,13 +114,13 @@ function set_initial_pdf!(Fold::AbstractArray{mk_float,2},
             end
         end
     end
-    if vpa.bc == "zero"
+    if vpa.bc == zero_boundary_condition
         @inbounds for ivperp in 1:vperp.n
             Fold[1,ivperp] = 0.0
             Fold[end,ivperp] = 0.0
         end
     end
-    if vperp.bc == "zero"
+    if vperp.bc == zero_boundary_condition
         @inbounds for ivpa in 1:vpa.n
             Fold[ivpa,end] = 0.0
         end

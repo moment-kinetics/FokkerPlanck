@@ -17,29 +17,24 @@ function runtests()
         nelement = 20 # number of elements per rank
         Lvpa = 18.0 #physical box size in reference units 
         Lvperp = 9.0 #physical box size in reference units 
-        bc = "" #not required to take a particular value, not used 
         element_spacing_option = "uniform"
         # create the coordinate structs
         vr = finite_element_coordinate("vperp1d", scalar_coordinate_inputs(1,
                                 1,
                                 1.0),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
         vz = finite_element_coordinate("vpa1d", scalar_coordinate_inputs(ngrid,
                                 nelement,
                                 Lvpa),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
         vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
                                 nelement,
                                 Lvperp),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
         vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
                                 nelement,
                                 Lvpa),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc)
+                                element_spacing_option=element_spacing_option)
         
         dfn = allocate_float(vpa.n,vperp.n)
         dfn1D = allocate_float(vz.n, vr.n)

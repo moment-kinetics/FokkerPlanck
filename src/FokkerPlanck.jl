@@ -45,7 +45,10 @@ using Dates
 using LinearAlgebra: lu, ldiv!
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
-using ..coordinates: finite_element_coordinate, scalar_coordinate_inputs
+using ..coordinates: finite_element_coordinate,
+                    scalar_coordinate_inputs,
+                    finite_element_boundary_condition_type,
+                    natural_boundary_condition, zero_boundary_condition
 using ..velocity_moments: get_density
 using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct,
                                 assemble_explicit_collision_operator_rhs_serial!,
@@ -78,8 +81,8 @@ and the latterr is defined in `FiniteElementMatrices`.
 function init_fokker_planck_collisions(
     inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
     inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
-    bc_vpa="none"::String,
-    bc_vperp="none"::String,
+    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
     boundary_data_option=multipole_expansion::boundary_data_type,
     nl_solver_atol=1.0e-10::mk_float,
     nl_solver_rtol=0.0::mk_float,
