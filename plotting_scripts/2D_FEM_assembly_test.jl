@@ -221,7 +221,8 @@ end
             # enforce the boundary conditions on CC before it is used for timestepping
             enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
             # make ad-hoc conserving corrections
-            conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp,dummy_vpavperp)            
+            conserving_corrections!(fkpl_arrays.CC,Fs_M,fkpl_arrays)
+            #conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp)
         end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
         calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.GG,fkpl_arrays.HH,fkpl_arrays.dHdvpa,fkpl_arrays.dHdvperp,
