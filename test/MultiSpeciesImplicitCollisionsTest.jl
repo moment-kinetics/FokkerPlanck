@@ -2,7 +2,7 @@ using Dates
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck: init_fokker_planck_collisions,fokker_planck_self_collisions_backward_euler_step!,
-                                    fokker_planck_self_collision_operator_weak_form!,
+                                    fokker_planck_collision_operator_weak_form!,
                                     fokkerplanck_weakform_arrays_struct
 using FokkerPlanck.fokker_planck_calculus: multipole_expansion, boundary_data_type
 
@@ -96,8 +96,8 @@ function test_implicit_collisions(;
     # store initial pdf for output
     Fout[:,:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
-    fokker_planck_self_collision_operator_weak_form!(Fold, ms, nuss, fkpl_arrays,
-                use_conserving_corrections=test_numerical_conserving_terms)
+    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays)
+                #, use_conserving_corrections=test_numerical_conserving_terms)
     # print diagnostic info to screen
     if print_diagnostics
         diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,time,ms,0)

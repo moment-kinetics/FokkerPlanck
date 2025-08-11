@@ -22,7 +22,7 @@ export allocate_preconditioner_matrix
 export calculate_test_particle_preconditioner!
 export advance_linearised_test_particle_collisions!
 export density_conserving_correction!, conserving_corrections!
-export species_info
+export species_info, calculate_cross_species_rosenbluth_potential_sums!
 # testing
 export calculate_rosenbluth_potential_boundary_data_exact!
 export allocate_rosenbluth_potential_boundary_data
@@ -509,9 +509,20 @@ struct fokkerplanck_weakform_arrays_struct
     S_dummy::Array{mk_float,2}
     Q_dummy::Array{mk_float,2}
     rhsvpavperp::Array{mk_float,2}
+    # dummy array for the result of the calculation (multi species)
+    CCs::Array{mk_float,3}
+    # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
+    GGs::Array{mk_float,3}
+    HHs::Array{mk_float,3}
+    dHsdvpa::Array{mk_float,3}
+    dHsdvperp::Array{mk_float,3}
+    dGsdvperp::Array{mk_float,3}
+    d2Gsdvperp2::Array{mk_float,3}
+    d2Gsdvpa2::Array{mk_float,3}
+    d2Gsdvperpdvpa::Array{mk_float,3}
     # dummy array for the result of the calculation
     CC::Array{mk_float,2}
-    # dummy arrays for storing Rosenbluth potentials
+    # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
     GG::Array{mk_float,2}
     HH::Array{mk_float,2}
     dHdvpa::Array{mk_float,2}
@@ -575,7 +586,7 @@ struct fokkerplanck_weakform_arrays_struct
             println("finished LU decomposition initialisation   ", Dates.format(now(), dateformat"H:MM:SS"))
         end
         
-        nvpa, nvperp = vpa.n, vperp.n
+        nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         S_dummy = allocate_float(nvpa,nvperp)
         Q_dummy = allocate_float(nvpa,nvperp)
         rhsvpavperp = allocate_float(nvpa,nvperp)
@@ -589,6 +600,16 @@ struct fokkerplanck_weakform_arrays_struct
         d2Gdvperp2 = allocate_float(nvpa,nvperp)
         d2Gdvpa2 = allocate_float(nvpa,nvperp)
         d2Gdvperpdvpa = allocate_float(nvpa,nvperp)
+
+        CCs = allocate_float(nvpa,nvperp,nspecies)
+        GGs = allocate_float(nvpa,nvperp,nspecies)
+        HHs = allocate_float(nvpa,nvperp,nspecies)
+        dHsdvpa = allocate_float(nvpa,nvperp,nspecies)
+        dHsdvperp = allocate_float(nvpa,nvperp,nspecies)
+        dGsdvperp = allocate_float(nvpa,nvperp,nspecies)
+        d2Gsdvperp2 = allocate_float(nvpa,nvperp,nspecies)
+        d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
+        d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
         
         FF = allocate_float(nvpa,nvperp)
         dFdvpa = allocate_float(nvpa,nvperp)
@@ -614,6 +635,7 @@ struct fokkerplanck_weakform_arrays_struct
                     PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
                     lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
                     YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
+                    CCs, GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
                     CC, GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
                     FF, dFdvpa, dFdvperp, 
                     CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D,
@@ -2754,7 +2776,7 @@ Note: all variants of `elliptic_solve!()` run only in serial. They do not handle
 shared-memory parallelism themselves. The calling site must ensure that
 `elliptic_solve!()` is only called by one process in a shared-memory block.
 """
-function elliptic_solve!(field::Tpdf,source::Tpdf,
+function elliptic_solve!(field::AbstractArray{mk_float,2},source::Tpdf,
             boundary_data::vpa_vperp_boundary_data,
             lu_object_lhs::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},
             matrix_rhs::AbstractSparseArray{mk_float,mk_int,2},rhsvpavperp::Tpdf,
@@ -2778,7 +2800,7 @@ function elliptic_solve!(field::Tpdf,source::Tpdf,
 end
 # same as above but source is made of two different terms
 # with different weak matrices
-function elliptic_solve!(field::Tpdf,source_1::Tpdf,source_2::Tpdf,
+function elliptic_solve!(field::AbstractArray{mk_float,2},source_1::Tpdf,source_2::Tpdf,
             boundary_data::vpa_vperp_boundary_data,
             lu_object_lhs::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},
             matrix_rhs_1::AbstractSparseArray{mk_float,mk_int,2},
@@ -3113,6 +3135,32 @@ function enforce_vpavperp_BCs!(pdf::AbstractArray{mk_float,2},
         @inbounds for ivpa in 1:vpa.n
             pdf[ivpa,nvperp] = 0.0
         end
+    end
+    return nothing
+end
+
+"""
+"""
+function calculate_cross_species_rosenbluth_potential_sums!(
+                d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
+                d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                species,is::mk_int)
+    mass = species.mass
+    zeds = species.zeds
+    d2Gdvpa2 .= 0.0
+    d2Gdvperpdvpa .= 0.0
+    d2Gdvperp2 .= 0.0
+    dHdvpa .= 0.0
+    dHdvperp .= 0.0
+    # note that Coulomb logarithm factors are missing
+    for isp in 1:species.n
+        G_factor = (zeds[is]*zeds[isp]/mass[is])^2
+        H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
+        @. d2Gdvpa2 += d2Gsdvpa2[:,:,isp]*G_factor
+        @. d2Gdvperpdvpa += d2Gsdvperpdvpa[:,:,isp]*G_factor
+        @. d2Gdvperp2 += d2Gsdvperp2[:,:,isp]*G_factor
+        @. dHdvpa += dHsdvpa[:,:,isp]*H_factor
+        @. dHdvperp += dHsdvperp[:,:,isp]*H_factor
     end
     return nothing
 end
