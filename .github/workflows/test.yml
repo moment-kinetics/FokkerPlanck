@@ -1,7 +1,8 @@
 # Based on example from https://github.com/julia-actions/julia-runtest
 name: Run tests
 
-on: [pull_request, push, workflow_dispatch]
+on: [pull_request]
+#on: [pull_request, push, workflow_dispatch]
 
 permissions:
   actions: write
