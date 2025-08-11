@@ -22,6 +22,7 @@ export allocate_preconditioner_matrix
 export calculate_test_particle_preconditioner!
 export advance_linearised_test_particle_collisions!
 export density_conserving_correction!, conserving_corrections!
+export species_info
 # testing
 export calculate_rosenbluth_potential_boundary_data_exact!
 export allocate_rosenbluth_potential_boundary_data
@@ -439,6 +440,34 @@ struct YY_collision_operator_arrays
 end
 
 """
+Immutable information about each species
+"""
+struct species_info
+    # number of species
+    n::mk_int
+    # mass of each species
+    mass::Vector{mk_float}
+    # charge number of each species
+    zeds::Vector{mk_float}
+    """
+    Internal constructor for `species_info`.
+    """
+    function species_info(mass,zeds)
+        # number of species
+        nspecies = length(zeds)
+        # check inputs are consistent
+        @boundscheck nspecies == length(mass)
+        # check mass positive and > 0
+        for is in 1:nspecies
+            if mass[is] < 1.0e-12
+                error("ERROR: mass[$is] < 1.0e-12")
+            end
+        end
+        return new(nspecies,mass,zeds)
+    end
+end
+
+"""
 Struct of dummy arrays and precalculated coefficients
 for the finite-element weak-form Fokker-Planck collision operator.
 """
@@ -447,6 +476,8 @@ struct fokkerplanck_weakform_arrays_struct
     vpa::finite_element_coordinate
     # vperp coordinate struct
     vperp::finite_element_coordinate
+    # species information
+    species::species_info
     # boundary weights (Green's function) data
     bwgt::fokkerplanck_boundary_integration_struct
     # dummy arrays for boundary data calculation
@@ -515,6 +546,7 @@ struct fokkerplanck_weakform_arrays_struct
     """
     function fokkerplanck_weakform_arrays_struct(vpa::finite_element_coordinate,
                                                 vperp::finite_element_coordinate,
+                                                species::species_info,
                                                 boundary_data_option::boundary_data_type;
                                                 nl_solver_atol=1.0e-10::mk_float,
                                                 nl_solver_rtol=0.0::mk_float,
@@ -575,7 +607,7 @@ struct fokkerplanck_weakform_arrays_struct
         F_rhs_delta = allocate_float(nvpa,nvperp)
         Fv = allocate_float(nvpa,nvperp)
         Fw = allocate_float(nvpa,nvperp)
-        return new(vpa,vperp,bwgt,rpbd,boundary_data_option,
+        return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
                     MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
                     KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
                     LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,

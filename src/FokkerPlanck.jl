@@ -58,7 +58,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct,
                                 calculate_test_particle_preconditioner!,
                                 advance_linearised_test_particle_collisions!,
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
-                                conserving_corrections!, density_conserving_correction!
+                                conserving_corrections!, density_conserving_correction!,
+                                species_info
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -79,6 +80,8 @@ where the former type is defined in `FokkerPlanck.coordinates`
 and the latterr is defined in `FiniteElementMatrices`.
 """
 function init_fokker_planck_collisions(
+    mass::Vector{mk_float},
+    zeds::Vector{mk_float},
     inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
     inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
     bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
@@ -94,8 +97,9 @@ function init_fokker_planck_collisions(
                                 bc=bc_vperp)
     vpa = finite_element_coordinate("vpa", inputs_vpa,
                                 bc=bc_vpa)
+    species = species_info(mass,zeds)
     # use constructor function for fokkerplanck_weakform_arrays_struct
-    return fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option;
+    return fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option;
                 nl_solver_atol=nl_solver_atol,
                 nl_solver_rtol=nl_solver_rtol,
                 nl_solver_nonlinear_max_iterations=nl_solver_nonlinear_max_iterations,
