@@ -9,6 +9,7 @@ using FokkerPlanck.coordinates: scalar_coordinate_inputs,
                             zero_boundary_condition, natural_boundary_condition
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_qpar, get_rmom
+using FokkerPlanck.fokker_planck_calculus: species_info
 using FiniteElementMatrices: element_coordinates
 using Printf
 
@@ -32,6 +33,23 @@ struct moments_struct
     end
 end
 
+function calculate_total_parallel_momentum(moments::moments_struct,species::species_info)
+    parallel_momentum = 0.0
+    for is in 1:species.n
+        parallel_momentum += species.mass[is]*moments.density[is]*moments.upar[is]
+    end
+    return parallel_momentum
+end
+
+function calculate_total_energy(moments::moments_struct,species::species_info)
+    total_energy = 0.0
+    for is in 1:species.n
+        total_energy += (0.5*species.mass[is]*moments.density[is]*(moments.upar[is]^2)
+                           + 1.5*moments.pressure[is])
+    end
+    return total_energy
+end
+
 function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     # extract coordinates
     vpa = fkpl_arrays.vpa
@@ -43,7 +61,7 @@ function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     ppar = get_ppar(pdf, vpa, vperp, upar)
     qpar = get_qpar(pdf, vpa, vperp, upar)
     rmom = get_rmom(pdf, vpa, vperp, upar)
-    return dens, upar, vth, ppar, qpar, rmom
+    return dens, upar, vth, pressure, ppar, qpar, rmom
 end
 
 function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
@@ -57,7 +75,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
-    dens, upar, vth, ppar, qpar, rmom = get_moments(pdf,fkpl_arrays,mass)
+    dens, upar, vth, pressure, ppar, qpar, rmom = get_moments(pdf,fkpl_arrays,mass)
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -100,6 +118,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
             moments.density[is],
             moments.upar[is],
             moments.vth[is],
+            moments.pressure[is],
             moments.ppar[is],
             moments.qpar[is],
             moments.rmom[is] = @views get_moments(pdf[:,:,is],fkpl_arrays,species.mass[is])
@@ -117,13 +136,17 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     for is in 1:species.n
         @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]",vpa,vperp,pdf_dummy_2;print_to_screen=true)
     end
-    println("dens: ", moments.density)
-    println("upar: ", moments.upar)
-    println("vth: ", moments.vth)
-    println("ppar: ", moments.ppar)
-    println("qpar: ", moments.qpar)
-    println("rmom: ", moments.rmom)
+    # println("upar: ", moments.upar)
+    # println("vth: ", moments.vth)
+    # println("ppar: ", moments.ppar)
+    # println("qpar: ", moments.qpar)
+    # println("rmom: ", moments.rmom)
+    total_parallel_momentum = calculate_total_parallel_momentum(moments,species)
+    total_energy = calculate_total_energy(moments,species)
     dSdt = calculate_entropy_production(pdf,fkpl_arrays)
+    println("dens: ", moments.density)
+    println("parallel momentum: ", total_parallel_momentum)
+    println("total energy: ", total_energy)
     println("dSdt: ", dSdt)
     if vpa.bc == zero_boundary_condition
         for is in 1:species.n
