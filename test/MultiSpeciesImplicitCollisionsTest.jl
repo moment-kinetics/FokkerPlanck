@@ -1,7 +1,7 @@
 using Dates
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: init_fokker_planck_collisions,fokker_planck_self_collisions_backward_euler_step!,
+using FokkerPlanck: init_fokker_planck_collisions,fokker_planck_collisions_backward_euler_step!,
                                     fokker_planck_collision_operator_weak_form!,
                                     fokkerplanck_weakform_arrays_struct
 using FokkerPlanck.fokker_planck_calculus: multipole_expansion, boundary_data_type
@@ -24,7 +24,7 @@ function test_implicit_collisions(;
     ntime=1::mk_int,delta_t=1.0::mk_float,
     # nonlinear solver options
     atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
-    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
+    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=false::Bool,
     # model options
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
@@ -83,8 +83,9 @@ function test_implicit_collisions(;
     # dummy arrays needed for diagnostics
     Fout = allocate_float(vpa.n,vperp.n,species.n,2)
     Fdummy1 = allocate_float(vpa.n,vperp.n,species.n)
-    Fdummy2 = allocate_float(vpa.n,vperp.n,species.n)
-    Fdummy3 = allocate_float(vpa.n,vperp.n,species.n)
+    Fdummy2 = allocate_float(vpa.n,vperp.n)
+    Fdummy3 = allocate_float(vpa.n,vperp.n)
+    moments = moments_struct(species.n)
     # physics parameters
     ms = 1.0
     nuss = 1.0
@@ -100,30 +101,32 @@ function test_implicit_collisions(;
                 #, use_conserving_corrections=test_numerical_conserving_terms)
     # print diagnostic info to screen
     if print_diagnostics
-        diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,time,ms,0)
+        diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,0)
     end
     finish_init_time = now()
     # time advance with backward Euler
     for it in 1:ntime
         # use Fold = F^n to obtain Fnew = F^n+1 for n = it 
-        fokker_planck_self_collisions_backward_euler_step!(Fold, delta_t, ms, nuss, fkpl_arrays,
+        fokker_planck_collisions_backward_euler_step!(Fold, delta_t, nuss, fkpl_arrays,
             use_conserving_corrections=test_numerical_conserving_terms,
             test_particle_preconditioner=test_particle_preconditioner,
             test_linearised_advance=test_linearised_advance,
             use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
-        # update the pdf by extracting Fnew from fkpl_arrays
-        Fnew = fkpl_arrays.Fnew
+        # update the pdf by extracting Fs_new from fkpl_arrays
+        Fnew = fkpl_arrays.Fs_new
         @inbounds begin
-            for ivperp in 1:vperp.n
-                for ivpa in 1:vpa.n
-                    Fold[ivpa,ivperp] = Fnew[ivpa,ivperp]
+            for is in 1:species.n
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                        Fold[ivpa,ivperp,is] = Fnew[ivpa,ivperp,is]
+                    end
                 end
             end
         end
         # diagnose the updated Fold
         time += delta_t
         if print_diagnostics
-            diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,time,ms,it)
+            diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,it)
         end
     end
     finish_run_time = now()
@@ -151,12 +154,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     using Pkg
     Pkg.activate(".")
     # run once to precompile
-    test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
+    test_implicit_collisions(test_particle_preconditioner=false,test_numerical_conserving_terms=true,
         vth0=[0.5,0.5],vperp0=[1.0,1.0],vpa0=[1.0,1.0],nelement_vpa=4,nelement_vperp=2,Lvpa=8.0,Lvperp=4.0,
         bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
         ntime=1, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
     # run a standard case now we are precompiled
-    test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
+    test_implicit_collisions(test_particle_preconditioner=false,test_numerical_conserving_terms=true,
         vth0=[0.5,0.5],vperp0=[1.0,1.0],vpa0=[1.0,1.0],nelement_vpa=32,nelement_vperp=16,Lvpa=8.0,Lvperp=4.0,
         bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
         ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false)

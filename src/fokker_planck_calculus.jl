@@ -549,6 +549,14 @@ struct fokkerplanck_weakform_arrays_struct
     F_rhs_delta::Array{mk_float,2}
     Fv::Array{mk_float,2}
     Fw::Array{mk_float,2}
+    # multispecies dummy arrays
+    nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
+    Fs_new::Array{mk_float,3}
+    Fs_residual::Array{mk_float,3}
+    Fs_delta_x::Array{mk_float,3}
+    Fs_rhs_delta::Array{mk_float,3}
+    Fsv::Array{mk_float,3}
+    Fsw::Array{mk_float,3}
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
@@ -628,6 +636,16 @@ struct fokkerplanck_weakform_arrays_struct
         F_rhs_delta = allocate_float(nvpa,nvperp)
         Fv = allocate_float(nvpa,nvperp)
         Fw = allocate_float(nvpa,nvperp)
+        nl_solver_data_s = nl_solver_info((species=species,vperp=vperp,vpa=vpa);
+                                        atol=nl_solver_atol,
+                                        rtol=nl_solver_rtol,
+                                        nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
+        Fs_new = allocate_float(nvpa,nvperp,nspecies)
+        Fs_residual = allocate_float(nvpa,nvperp,nspecies)
+        Fs_delta_x = allocate_float(nvpa,nvperp,nspecies)
+        Fs_rhs_delta = allocate_float(nvpa,nvperp,nspecies)
+        Fsv = allocate_float(nvpa,nvperp,nspecies)
+        Fsw = allocate_float(nvpa,nvperp,nspecies)
         return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
                     MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
                     KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
@@ -640,7 +658,8 @@ struct fokkerplanck_weakform_arrays_struct
                     FF, dFdvpa, dFdvperp, 
                     CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D,
                     rhs_advection,
-                    nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw)
+                    nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
+                    nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw)
     end
 end
 

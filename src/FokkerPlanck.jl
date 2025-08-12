@@ -40,6 +40,7 @@ export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 export calculate_entropy_production
 # implicit advance
 export fokker_planck_self_collisions_backward_euler_step!
+export fokker_planck_collisions_backward_euler_step!
 
 using Dates
 using LinearAlgebra: lu, ldiv!
@@ -202,6 +203,7 @@ function fokker_planck_collision_operator_weak_form!(
                          ff_in::AbstractArray{mk_float,3},
                          nuref::mk_float,
                          fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                         use_conserving_corrections=false::Bool,
                          use_Maxwellian_Rosenbluth_coefficients=false::Bool,
                          algebraic_solve_for_d2Gdvperp2 = false::Bool, calculate_GG=false::Bool,
                          calculate_dGdvperp=false::Bool)
@@ -416,6 +418,30 @@ function calculate_entropy_production(pdf::AbstractArray{mk_float,2},
     dSdt = -get_density(lnfC,vpa,vperp)
     return dSdt
 end
+function calculate_entropy_production(pdf::AbstractArray{mk_float,3},
+                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    # extract collision operators
+    CCs = fkpl_arrays.CCs
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    # assign dummy array
+    lnfC = fkpl_arrays.rhsvpavperp
+    dSdt = 0.0
+    @inbounds begin
+        # compute entropy production for each species,
+        # and sum to get the total entropy production
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    lnfC[ivpa,ivperp] = log(abs(pdf[ivpa,ivperp,is]) + 1.0e-15)*CCs[ivpa,ivperp,is]
+                end
+            end
+            dSdt += -get_density(lnfC,vpa,vperp)
+        end
+    end
+    return dSdt
+end
 
 
 ######################################################
@@ -525,6 +551,110 @@ function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{
                 end
             end
         end
+    end
+    return success
+end
+function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_float,3},
+                        delta_t::mk_float, nuref::mk_float,
+                        fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                        use_conserving_corrections=true::Bool,
+                        test_linearised_advance=false::Bool,
+                        test_particle_preconditioner=true::Bool,
+                        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool)
+
+    species = fkpl_arrays.species
+    vperp = fkpl_arrays.vperp
+    vpa = fkpl_arrays.vpa
+    # residual function to be used for Newton-Krylov
+    # residual(vpa, vperp, species) = F^(n+1) - F^n - dt * C[F^n+1,F^n+1]
+    function residual_func!(Fresidual, Fnew; krylov=false)
+        fokker_planck_collision_operator_weak_form!(
+                        Fnew, nuref,
+                        fkpl_arrays;
+                        use_conserving_corrections=use_conserving_corrections)
+        @inbounds begin
+            for is in 1:species.n
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                        Fresidual[ivpa,ivperp,is] = Fnew[ivpa,ivperp,is] - Fold[ivpa,ivperp,is] - delta_t * (fkpl_arrays.CCs[ivpa,ivperp,is])
+                    end
+                end
+            end
+        end
+        return nothing
+    end
+
+    if test_particle_preconditioner
+        # test particle preconditioner CC2D_sparse is the matrix
+        # K_ijkl = int phi_i(vpa)phi_j(vperp) ( phi_k(vpa)phi_l(vperp) - dt C[ phi_k(vpa)phi_l(vperp) , F^n(vpa,vperp) ])  vperp d vperp d vpa,
+        # such that K * F^n+1 = M * F^n advances the linearised collision operator due
+        # to test particle collisions only (differential piece of C).
+        # CC2D_sparse is the approximate Jacobian for the residual Fresidual.
+        calculate_test_particle_preconditioner!(Fold,delta_t,ms,ms,nuss,fkpl_arrays,
+                    use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
+
+        function test_particle_precon!(x)
+            # let K * dF = C[dF,F^n]
+            # function to solve K * F^n+1 = M * F^n
+            # and return F^n+1 in place in x
+            pdf = x
+            advance_linearised_test_particle_collisions!(pdf,fkpl_arrays)
+            return nothing
+        end
+        right_preconditioner = test_particle_precon!
+    else
+        right_preconditioner = nothing
+    end
+    # initial condition for Fnew for JFNK or linearised advance below
+    Fnew = fkpl_arrays.Fs_new
+    @inbounds begin
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    Fnew[ivpa,ivperp,is] = Fold[ivpa,ivperp,is]
+                end
+            end
+        end
+    end
+    if test_linearised_advance
+        test_particle_precon!(Fnew)
+    else
+        nl_solver_params = fkpl_arrays.nl_solver_data_s
+        Fresidual = fkpl_arrays.Fs_residual
+        F_delta_x = fkpl_arrays.Fs_delta_x
+        F_rhs_delta = fkpl_arrays.Fs_rhs_delta
+        Fv = fkpl_arrays.Fsv
+        Fw = fkpl_arrays.Fsw
+        success = newton_solve!(Fnew, residual_func!,
+                        Fresidual, F_delta_x, F_rhs_delta, Fv, Fw, nl_solver_params;
+                        right_preconditioner=right_preconditioner)
+        # # apply BCs on result, if non-natural BCs are imposed
+        # # should only introduce error of order ~ atol
+        # enforce_vpavperp_BCs!(Fnew,vpa,vperp)
+        # if use_conserving_corrections
+        #     # ad-hoc end-of-step corrections, again introducing only ~atol error
+        #     deltaF = fkpl_arrays.rhsvpavperp
+        #     @inbounds begin
+        #         for ivperp in 1:vperp.n
+        #             for ivpa in 1:vpa.n
+        #                 deltaF[ivpa,ivperp] = Fnew[ivpa,ivperp] - Fold[ivpa,ivperp]
+        #             end
+        #         end
+        #     end
+        #     # correct deltaF = F^n+1 - F^n so it has no change in moments n, u, p
+        #     # this introduces errors of the size of the distance between F^n+1 and the
+        #     # "correct" root that should have been found by the iterative solve, i.e.,
+        #     # errors of size ~ atol.
+        #     conserving_corrections!(deltaF, Fold, vpa, vperp)
+        #     # update Fnew
+        #     @inbounds begin
+        #         for ivperp in 1:vperp.n
+        #             for ivpa in 1:vpa.n
+        #                 Fnew[ivpa,ivperp] = deltaF[ivpa,ivperp] + Fold[ivpa,ivperp]
+        #             end
+        #         end
+        #     end
+        # end
     end
     return success
 end

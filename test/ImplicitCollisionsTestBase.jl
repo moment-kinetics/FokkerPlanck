@@ -12,6 +12,40 @@ using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_pp
 using FiniteElementMatrices: element_coordinates
 using Printf
 
+struct moments_struct
+    density::Vector{mk_float}
+    upar::Vector{mk_float}
+    vth::Vector{mk_float}
+    pressure::Vector{mk_float}
+    ppar::Vector{mk_float}
+    qpar::Vector{mk_float}
+    rmom::Vector{mk_float}
+    function moments_struct(nspecies::mk_int)
+        density = allocate_float(nspecies)
+        upar = allocate_float(nspecies)
+        vth = allocate_float(nspecies)
+        pressure = allocate_float(nspecies)
+        ppar = allocate_float(nspecies)
+        qpar = allocate_float(nspecies)
+        rmom = allocate_float(nspecies)
+        return new(density, upar, vth, pressure, ppar, qpar, rmom)
+    end
+end
+
+function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
+    # extract coordinates
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    dens = get_density(pdf,vpa,vperp)
+    upar = get_upar(pdf, vpa, vperp, dens)
+    pressure = get_pressure(pdf, vpa, vperp, upar)
+    vth = sqrt(2.0*pressure/(dens*mass))
+    ppar = get_ppar(pdf, vpa, vperp, upar)
+    qpar = get_qpar(pdf, vpa, vperp, upar)
+    rmom = get_rmom(pdf, vpa, vperp, upar)
+    return dens, upar, vth, ppar, qpar, rmom
+end
+
 function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
                     pdf_exact::AbstractArray{mk_float,2},
                     pdf_dummy_1::AbstractArray{mk_float,2},
@@ -23,13 +57,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
-    dens = get_density(pdf,vpa,vperp)
-    upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar)
-    vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf, vpa, vperp, upar)
-    qpar = get_qpar(pdf, vpa, vperp, upar)
-    rmom = get_rmom(pdf, vpa, vperp, upar)
+    dens, upar, vth, ppar, qpar, rmom = get_moments(pdf,fkpl_arrays,mass)
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -53,6 +81,60 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
     end
     if vperp.bc == zero_boundary_condition
         println("test vperp bc: F[:, end]", pdf[:, end])
+    end
+end
+function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
+                    pdf_exact::AbstractArray{mk_float,3},
+                    pdf_dummy_1::AbstractArray{mk_float,2},
+                    pdf_dummy_2::AbstractArray{mk_float,2},
+                    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                    moments::moments_struct,
+                    time::mk_float,
+                    it::mk_int)
+    # extract coordinates
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    @inbounds begin
+        for is in 1:species.n
+            moments.density[is],
+            moments.upar[is],
+            moments.vth[is],
+            moments.ppar[is],
+            moments.qpar[is],
+            moments.rmom[is] = @views get_moments(pdf[:,:,is],fkpl_arrays,species.mass[is])
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    pdf_exact[ivpa,ivperp,is] = F_Maxwellian(moments.density[is],
+                                                            moments.upar[is],
+                                                            moments.vth[is],
+                                                            vpa,vperp,ivpa,ivperp)
+                end
+            end
+        end
+    end
+    println("it = ", it, " time: ", time)
+    for is in 1:species.n
+        @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]",vpa,vperp,pdf_dummy_2;print_to_screen=true)
+    end
+    println("dens: ", moments.density)
+    println("upar: ", moments.upar)
+    println("vth: ", moments.vth)
+    println("ppar: ", moments.ppar)
+    println("qpar: ", moments.qpar)
+    println("rmom: ", moments.rmom)
+    dSdt = calculate_entropy_production(pdf,fkpl_arrays)
+    println("dSdt: ", dSdt)
+    if vpa.bc == zero_boundary_condition
+        for is in 1:species.n
+            println("test vpa bc: F[1, :, $is]", pdf[1, :, is])
+            println("test vpa bc: F[end, :, $is]", pdf[end, :, is])
+        end
+    end
+    if vperp.bc == zero_boundary_condition
+        for is in 1:species.n
+            println("test vperp bc: F[:, end, $is]", pdf[:, end, is])
+        end
     end
 end
 
