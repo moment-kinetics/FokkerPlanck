@@ -539,6 +539,7 @@ struct fokkerplanck_weakform_arrays_struct
     CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
     CC2D_sparse_constructor::sparse_matrix_constructor
     lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
     # dummy array for vpa vperp advection contributions
     rhs_advection::Array{mk_float,2}
     # dummy arrays for Jacobian-Free-Newton-Krylov solver
@@ -624,6 +625,10 @@ struct fokkerplanck_weakform_arrays_struct
         dFdvperp = allocate_float(nvpa,nvperp)
         # preconditioner matrix
         CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
+        lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
+        for is in 1:nspecies
+            lu_objs_CC2D[is] = lu_obj_CC2D
+        end
         rhs_advection = allocate_float(nvpa,nvperp)
         # dummy arrays for JFNK
         nl_solver_data = setup_fp_nl_solve(vpa,vperp;
@@ -656,7 +661,7 @@ struct fokkerplanck_weakform_arrays_struct
                     CCs, GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
                     CC, GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
                     FF, dFdvpa, dFdvperp, 
-                    CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D,
+                    CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
                     rhs_advection,
                     nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
                     nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw)
@@ -2667,6 +2672,198 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     end
     return nothing
 end
+function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
+    delta_t::mk_float,nuref::mk_float,
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+    use_Maxwellian_Rosenbluth_coefficients=false,
+    algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
+    calculate_dGdvperp=false)
+
+    #Precon2D_sparse = fkpl_arrays.Precon2D_sparse
+    #CC2D_sparse = fkpl_arrays.CC2D_sparse
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
+    YY_arrays = fkpl_arrays.YY_arrays
+    # dummy arrays for summed Rosenbluth potentials
+    dHdvpa_sum = fkpl_arrays.dHdvpa
+    dHdvperp_sum = fkpl_arrays.dHdvperp
+    d2Gdvperp2_sum = fkpl_arrays.d2Gdvperp2
+    d2Gdvpa2_sum = fkpl_arrays.d2Gdvpa2
+    d2Gdvperpdvpa_sum = fkpl_arrays.d2Gdvperpdvpa
+    # dummy arrays for Rosenbluth potentials by species
+    GGs = fkpl_arrays.GGs
+    HHs = fkpl_arrays.HHs
+    dHsdvpa = fkpl_arrays.dHsdvpa
+    dHsdvperp = fkpl_arrays.dHsdvperp
+    dGsdvperp = fkpl_arrays.dGsdvperp
+    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
+    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
+    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
+
+    # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
+    if use_Maxwellian_Rosenbluth_coefficients
+        for is in 1:species.n
+            @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
+                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
+                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,species.mass[is])
+        end
+    else
+        for is in 1:species.n
+            @views calculate_rosenbluth_potentials_via_elliptic_solve!(
+                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
+                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
+                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fkpl_arrays,
+                algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
+                calculate_dGdvperp=false)
+        end
+    end
+    @inbounds begin
+        # for each species, sum up the Rosenbluth potentials to make the appropriate
+        # total Rosenbluth potential, and assemble the preconditioner
+        for is in 1:species.n
+            calculate_cross_species_rosenbluth_potential_sums!(
+                    d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
+                    d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                    species,is)
+            # set the values of the matrix to zero before assembly
+            CC2D_sparse_constructor.SS .= 0.0
+            # assemble matrix for preconditioning collision operator
+            # we form the linearised collision operator matrix
+            # MM - dt * RHS_C
+            # with MM the mass matrix
+            # and RHS_C the operator such that RHS_C(pdf) * pdf is the usual RHS
+            # of the collision operator.
+            # loop over collocation points to benefit from shared-memory parallelism
+            # to form matrix operator such that  RHS = dt * Precon2D * pdf
+            massfac = 2.0
+            delt_nussp = delta_t*nuref
+            # loop over elements
+            for ielement_vperp in 1:vperp.nelement
+                @views YYNperp = YY_arrays.YYNperp[:,:,:,:,ielement_vperp]
+                @views MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
+                @views vperp_igrid_full = vperp.igrid_full[:,ielement_vperp]
+                imin_vperp, imax_vperp = vperp_igrid_full[1], vperp_igrid_full[vperp.ngrid]
+                for ielement_vpa in 1:vpa.nelement
+                    @views YYNpar = YY_arrays.YYNpar[:,:,:,:,ielement_vpa]
+                    @views MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
+                    @views vpa_igrid_full = vpa.igrid_full[:,ielement_vpa]
+                    imin_vpa, imax_vpa = vpa_igrid_full[1], vpa_igrid_full[vpa.ngrid]
+                    @views d2Gdvpa2_local = d2Gdvpa2_sum[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                    @views d2Gdvperp2_local = d2Gdvperp2_sum[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                    @views d2Gdvperpdvpa_local = d2Gdvperpdvpa_sum[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                    @views dHdvpa_local = dHdvpa_sum[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                    @views dHdvperp_local = dHdvperp_sum[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                    # loop over field positions in each element
+                    for ivperp_local in 1:vperp.ngrid
+                        for ivpa_local in 1:vpa.ngrid
+                            for jvperpp_local in 1:vperp.ngrid
+                                for jvpap_local in 1:vpa.ngrid
+                                    # carry out the matrix sum on each 2D element
+                                    # mass matrix contribution
+                                    # don't need these indices because we just overwrite
+                                    # the constructor values, not the indices
+                                    # ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                                    # icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,jvpap_local,jvperpp_local)
+                                    icsc = icsc_func(ivpa_local,jvpap_local,ielement_vpa,
+                                            vpa.ngrid,vpa.nelement,
+                                            ivperp_local,jvperpp_local,
+                                            ielement_vperp,
+                                            vperp.ngrid,vperp.nelement)
+                                    # use that mass matrices are symmetric here to index them
+                                    # in fastest order, contrary to convention when assembling Poisson operators.
+                                    assemble_constructor_value!(CC2D_sparse_constructor,icsc,
+                                                        (MMpar[jvpap_local,ivpa_local]*
+                                                        MMperp[jvperpp_local,ivperp_local]))
+                                    # collision operator contribution
+                                    result = 0.0
+                                    for kvperpp_local in 1:vperp.ngrid
+                                        for kvpap_local in 1:vpa.ngrid
+                                            # first three lines represent parallel flux terms
+                                            # second three lines represent perpendicular flux terms
+                                            result += delt_nussp*(YYNperp[1,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[3,kvpap_local,jvpap_local,ivpa_local]*d2Gdvpa2_local[kvpap_local,kvperpp_local] +
+                                                                YYNperp[4,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[2,kvpap_local,jvpap_local,ivpa_local]*d2Gdvperpdvpa_local[kvpap_local,kvperpp_local] -
+                                                                massfac*YYNperp[1,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[2,kvpap_local,jvpap_local,ivpa_local]*dHdvpa_local[kvpap_local,kvperpp_local] +
+                                                                # end parallel flux, start of perpendicular flux
+                                                                YYNperp[2,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[4,kvpap_local,jvpap_local,ivpa_local]*d2Gdvperpdvpa_local[kvpap_local,kvperpp_local] +
+                                                                YYNperp[3,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[1,kvpap_local,jvpap_local,ivpa_local]*d2Gdvperp2_local[kvpap_local,kvperpp_local] -
+                                                                massfac*YYNperp[2,kvperpp_local,jvperpp_local,ivperp_local]*YYNpar[1,kvpap_local,jvpap_local,ivpa_local]*dHdvperp_local[kvpap_local,kvperpp_local])
+                                        end
+                                    end
+                                    assemble_constructor_value!(CC2D_sparse_constructor,icsc,result)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            impose_BC_at_zero_vperp=false
+            zero_vpa_bc = vpa.bc == zero_boundary_condition
+            zero_vperp_bc = vperp.bc == zero_boundary_condition
+            # only support zero bc
+            if zero_vpa_bc || zero_vperp_bc
+                # loop over elements
+                for ielement_vperp in 1:vperp.nelement
+                    for ielement_vpa in 1:vpa.nelement
+                        # loop over field positions in each element
+                        for ivperp_local in 1:vperp.ngrid
+                            for ivpa_local in 1:vpa.ngrid
+                                for jvperpp_local in 1:vperp.ngrid
+                                    for jvpap_local in 1:vpa.ngrid
+                                        #ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                                        #icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,jvpap_local,jvperpp_local)
+                                        icsc = icsc_func(ivpa_local,jvpap_local,ielement_vpa,
+                                                vpa.ngrid,vpa.nelement,
+                                                ivperp_local,jvperpp_local,
+                                                ielement_vperp,
+                                                vperp.ngrid,vperp.nelement)
+
+                                        lower_boundary_row_vpa = (ielement_vpa == 1 && ivpa_local == 1)
+                                        upper_boundary_row_vpa = (ielement_vpa == vpa.nelement && ivpa_local == vpa.ngrid)
+                                        lower_boundary_row_vperp = (ielement_vperp == 1 && ivperp_local == 1)
+                                        upper_boundary_row_vperp = (ielement_vperp == vperp.nelement && ivperp_local == vperp.ngrid)
+
+                                        if lower_boundary_row_vpa && zero_vpa_bc
+                                            if jvpap_local == 1 && ivperp_local == jvperpp_local
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,1.0)
+                                            else
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,0.0)
+                                            end
+                                        elseif upper_boundary_row_vpa && zero_vpa_bc
+                                            if jvpap_local == vpa.ngrid && ivperp_local == jvperpp_local
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,1.0)
+                                            else
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,0.0)
+                                            end
+                                        elseif lower_boundary_row_vperp && impose_BC_at_zero_vperp
+                                            if jvperpp_local == 1 && ivpa_local == jvpap_local
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,1.0)
+                                            else
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,0.0)
+                                            end
+                                        elseif upper_boundary_row_vperp && zero_vperp_bc
+                                            if jvperpp_local == vperp.ngrid && ivpa_local == jvpap_local
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,1.0)
+                                            else
+                                                assign_constructor_value!(CC2D_sparse_constructor,icsc,0.0)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end # end bc assignment
+            # should improve on this step to avoid recreating the sparse array if possible.
+            fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
+            lu!(fkpl_arrays.lu_objs_CC2D[is], fkpl_arrays.CC2D_sparse)
+        end
+    end
+    return nothing
+end
 
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
                                     fkpl_arrays::fokkerplanck_weakform_arrays_struct)
@@ -2676,6 +2873,17 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     # this is also the LU decomposition of the approximate Jacobian
     # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     lu_CC = fkpl_arrays.lu_obj_CC2D
+    advance_linearised_test_particle_collisions!(pdf,fkpl_arrays,lu_CC)
+    return nothing
+end
+function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
+                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                                    lu_CC::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int})
+    # lu_CC (the LU decomposition object for)
+    # the backward Euler time advance matrix
+    # for linearised test particle collisions K * dF = C[dF, F^n+1].
+    # this is also the LU decomposition of the approximate Jacobian
+    # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # function to solve K * F^n+1 = M * F^n
@@ -2695,6 +2903,20 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     pdf_dummy_c = vec(pdf_dummy)
     mul!(pdf_dummy_c, MM2D_sparse, pdf_scratch_c)
     ldiv!(pdf_c,lu_CC,pdf_dummy_c)
+    return nothing
+end
+function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,3},
+                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    # (the vector of LU decomposition objects for)
+    # the backward Euler time advance matrix
+    # for multi-species linearised test particle collisions K * dF = C[dF, F^n+1].
+    # this is also the LU decomposition of the approximate Jacobian
+    # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
+    lu_CC = fkpl_arrays.lu_objs_CC2D
+    species = fkpl_arrays.species
+    for is in 1:species.n
+        @views advance_linearised_test_particle_collisions!(pdf[:,:,is],fkpl_arrays,lu_CC[is])
+    end
     return nothing
 end
 

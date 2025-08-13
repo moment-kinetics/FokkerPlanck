@@ -590,7 +590,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         # such that K * F^n+1 = M * F^n advances the linearised collision operator due
         # to test particle collisions only (differential piece of C).
         # CC2D_sparse is the approximate Jacobian for the residual Fresidual.
-        calculate_test_particle_preconditioner!(Fold,delta_t,ms,ms,nuss,fkpl_arrays,
+        calculate_test_particle_preconditioner!(Fold,delta_t,nuref,fkpl_arrays,
                     use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
 
         function test_particle_precon!(x)
