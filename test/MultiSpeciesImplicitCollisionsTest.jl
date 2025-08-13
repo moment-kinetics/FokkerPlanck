@@ -9,7 +9,7 @@ using FokkerPlanck.fokker_planck_calculus: multipole_expansion, boundary_data_ty
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
 
-function test_implicit_collisions(; 
+function test_multispecies_implicit_collisions(;
     # initial pdf info
     vth0=[0.5,0.5]::Vector{mk_float}, vperp0=[1.0,1.0]::Vector{mk_float}, vpa0=[0.0,0.0]::Vector{mk_float}, zbeam=[0.0,0.0]::Vector{mk_float},
     # species info
@@ -42,7 +42,7 @@ function test_implicit_collisions(;
     # check inputs are consistent
     @boundscheck (nspecies == length(mass) && nspecies == length(vth0) 
                    && nspecies == length(vperp0) && nspecies == length(vpa0)
-                   && nspecies == length(zbeam))
+                   && nspecies == length(zbeam)) || throw(BoundsError(zeds))
 
     start_init_time = now()
     # group integer inputs using `scalar_coordinate_inputs` from FokkerPlanck.coordinates
@@ -87,7 +87,6 @@ function test_implicit_collisions(;
     Fdummy3 = allocate_float(vpa.n,vperp.n)
     moments = moments_struct(species.n)
     # physics parameters
-    ms = 1.0
     nuss = 1.0
     # initial condition
     time = 0.0
