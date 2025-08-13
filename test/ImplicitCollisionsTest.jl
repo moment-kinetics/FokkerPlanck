@@ -48,8 +48,12 @@ function test_implicit_collisions(;
         input_vpa = input_vpa_scalar
         input_vperp = input_vperp_scalar
     end
+    # species parameters
+    mass = [1.0]
+    zeds = [1.0]
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
     fkpl_arrays = init_fokker_planck_collisions(
+                        mass, zeds,
                         input_vpa,
                         input_vperp;
                         bc_vpa=bc_vpa,

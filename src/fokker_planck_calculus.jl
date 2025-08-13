@@ -2538,7 +2538,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     end
     assemble_collision_operator_preconditioner_rhs!(
             d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-            delta_t,nuref,fkpl_arrays)
+            delta_t,nussp,fkpl_arrays)
     # should improve on this step to avoid recreating the sparse array if possible.
     fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
     lu!(fkpl_arrays.lu_obj_CC2D, fkpl_arrays.CC2D_sparse)

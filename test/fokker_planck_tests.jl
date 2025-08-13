@@ -15,7 +15,7 @@ using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_pp
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole
 
 using FokkerPlanck: init_fokker_planck_collisions, fokker_planck_collision_operator_weak_form!
-using FokkerPlanck: conserving_corrections!
+using FokkerPlanck: conserving_corrections!, species_info
 using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 using FokkerPlanck: fokker_planck_self_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
@@ -90,7 +90,8 @@ function backward_Euler_linearised_collisions_test(;
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=10.0,Lvperp=5.0,
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+    species = species_info([ms],[1.0])
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                         print_to_screen=print_to_screen)
     dummy_array = allocate_float(vpa.n,vperp.n)
     FMaxwell = allocate_float(vpa.n,vperp.n)
@@ -225,7 +226,8 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc_vpa,bc_vperp=bc_vperp)
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option;
+    species = species_info([1.0],[1.0])
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option;
                         nl_solver_atol=1.0e-10,
                         nl_solver_rtol=0.0,
                         print_to_screen=print_to_screen)
@@ -336,7 +338,8 @@ function numerical_error_corrections_test(;
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=Lvpa,Lvperp=Lvperp)
     boundary_data_option = multipole_expansion
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+    species = species_info([1.0],[1.0])
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                         print_to_screen=print_to_screen)
 
     pdf_in = allocate_float(vpa.n,vperp.n)
@@ -504,7 +507,8 @@ function runtests()
                                                     Lvpa=2.0,Lvperp=1.0)
             nc_global = vpa.n*vperp.n
             boundary_data_option = multipole_expansion
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+            species = species_info([1.0],[1.0])
+            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                                     print_to_screen=print_to_screen)
             KKpar2D_with_BC_terms_sparse = fkpl_arrays.KKpar2D_with_BC_terms_sparse
             KKperp2D_with_BC_terms_sparse = fkpl_arrays.KKperp2D_with_BC_terms_sparse
@@ -565,8 +569,8 @@ function runtests()
                 nelement_vperp = 4
                 vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                             Lvpa=12.0,Lvperp=6.0)
-                
-                fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+                species = species_info([1.0],[1.0])
+                fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                                                       print_to_screen=print_to_screen)
                 dummy_array = allocate_float(vpa.n,vperp.n)
                 F_M = allocate_float(vpa.n,vperp.n)
@@ -746,7 +750,8 @@ function runtests()
             vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                     Lvpa=12.0,Lvperp=6.0)
             boundary_data_option=direct_integration
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+            species = species_info([1.0],[1.0])
+            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                                         print_to_screen=print_to_screen)
 
             @testset "test_self_operator=$test_self_operator test_numerical_conserving_terms=$test_numerical_conserving_terms use_Maxwellian_Rosenbluth_coefficients=$use_Maxwellian_Rosenbluth_coefficients algebraic_solve_for_d2Gdvperp2=$algebraic_solve_for_d2Gdvperp2" for
@@ -890,7 +895,8 @@ function runtests()
             vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                 Lvpa=12.0,Lvperp=6.0)
             boundary_data_option=multipole_expansion
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option,
+            species = species_info([1.0],[1.0])
+            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                     print_to_screen=print_to_screen)
 
             @testset "slowing_down_test=true test_numerical_conserving_terms=$test_numerical_conserving_terms" for test_numerical_conserving_terms in (true,false)
