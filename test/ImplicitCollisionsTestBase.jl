@@ -56,11 +56,11 @@ function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     vperp = fkpl_arrays.vperp
     dens = get_density(pdf,vpa,vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar)
+    pressure = mass*get_pressure(pdf, vpa, vperp, upar)
     vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf, vpa, vperp, upar)
-    qpar = get_qpar(pdf, vpa, vperp, upar)
-    rmom = get_rmom(pdf, vpa, vperp, upar)
+    ppar = mass*get_ppar(pdf, vpa, vperp, upar)
+    qpar = mass*get_qpar(pdf, vpa, vperp, upar)
+    rmom = mass*get_rmom(pdf, vpa, vperp, upar)
     return dens, upar, vth, pressure, ppar, qpar, rmom
 end
 
@@ -145,6 +145,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     total_energy = calculate_total_energy(moments,species)
     dSdt = calculate_entropy_production(pdf,fkpl_arrays)
     println("dens: ", moments.density)
+    println("temp: ", moments.pressure./moments.density)
     println("parallel momentum: ", total_parallel_momentum)
     println("total energy: ", total_energy)
     println("dSdt: ", dSdt)
