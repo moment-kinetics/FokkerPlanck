@@ -26,7 +26,8 @@ using FokkerPlanck.fokker_planck_calculus: fokkerplanck_weakform_arrays_struct
 using FokkerPlanck.fokker_planck_calculus: rosenbluth_potential_boundary_data
 using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potential_boundary_data!, calculate_rosenbluth_potential_boundary_data_exact!
 using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_data, enforce_vpavperp_BCs!
-using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potentials_via_elliptic_solve!
+using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potentials_via_elliptic_solve!,
+                                            species_info
 
 function plot_test_data(func_exact,func_num,func_err,func_name,vpa,vperp)
     @views heatmap(vperp.grid, vpa.grid, func_num[:,:], ylabel=L"v_{\|\|}", xlabel=L"v_{\perp}", c = :deep, interpolation = :cubic,
@@ -88,7 +89,8 @@ end
                                     element_spacing_option=element_spacing_option)
         nc_global = vpa.n*vperp.n
         start_init_time = now()
-        fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,boundary_data_option)
+        species = species_info([1.0],[1.0])
+        fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option)
         KKpar2D_with_BC_terms_sparse = fkpl_arrays.KKpar2D_with_BC_terms_sparse
         KKperp2D_with_BC_terms_sparse = fkpl_arrays.KKperp2D_with_BC_terms_sparse
         lu_obj_MM = fkpl_arrays.lu_obj_MM
@@ -226,7 +228,7 @@ end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
         calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.GG,fkpl_arrays.HH,fkpl_arrays.dHdvpa,fkpl_arrays.dHdvperp,
              fkpl_arrays.d2Gdvpa2,fkpl_arrays.dGdvperp,fkpl_arrays.d2Gdvperpdvpa,fkpl_arrays.d2Gdvperp2,F_M,
-             vpa,vperp,fkpl_arrays;
+             vpa,vperp,fkpl_arrays,msp;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=true,calculate_dGdvperp=true)
         # extract C[Fs,Fs'] result
         # and Rosenbluth potentials for testing
@@ -292,8 +294,8 @@ end
         if test_self_operator
             delta_n = get_density(C_M_num, vpa, vperp)
             delta_upar = get_upar(C_M_num, vpa, vperp, dens)
-            delta_pressure = msp*get_pressure(C_M_num, vpa, vperp, upar)
-            delta_ppar = msp*get_ppar(C_M_num, vpa, vperp, upar)
+            delta_pressure = get_pressure(C_M_num, vpa, vperp, upar, msp)
+            delta_ppar = get_ppar(C_M_num, vpa, vperp, upar, msp)
             delta_pperp = get_pperp(delta_pressure, delta_ppar)
             println("delta_n: ", delta_n)
             println("delta_upar: ", delta_upar)

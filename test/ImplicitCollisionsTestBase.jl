@@ -56,11 +56,11 @@ function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     vperp = fkpl_arrays.vperp
     dens = get_density(pdf,vpa,vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = mass*get_pressure(pdf, vpa, vperp, upar)
+    pressure = get_pressure(pdf, vpa, vperp, upar, mass)
     vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = mass*get_ppar(pdf, vpa, vperp, upar)
-    qpar = mass*get_qpar(pdf, vpa, vperp, upar)
-    rmom = mass*get_rmom(pdf, vpa, vperp, upar)
+    ppar = get_ppar(pdf, vpa, vperp, upar, mass)
+    qpar = get_qpar(pdf, vpa, vperp, upar, mass)
+    rmom = get_rmom(pdf, vpa, vperp, upar, mass)
     return dens, upar, vth, pressure, ppar, qpar, rmom
 end
 

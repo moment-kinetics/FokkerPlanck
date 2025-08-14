@@ -147,7 +147,7 @@ function test_F_Maxwellian(pdf_Maxwell,pdf,
         vpa,vperp,dummy_array_2,print_to_screen=print_to_screen)
     dens_num = get_density(pdf, vpa, vperp)
     upar_num = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar)
+    pressure = get_pressure(pdf, vpa, vperp, upar, mass)
     vth_num = sqrt(2.0*pressure/(dens*mass))
     @test F_M_max < atol_max
     @test F_M_L2 < atol_L2
@@ -161,7 +161,7 @@ function diagnose_F_Maxwellian(pdf,pdf_exact,pdf_dummy_1,pdf_dummy_2,vpa,vperp,t
     
     dens = get_density(pdf,vpa,vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar)
+    pressure = get_pressure(pdf, vpa, vperp, upar, mass)
     vth = sqrt(2.0*pressure/(dens*mass))
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -275,7 +275,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     # Maxwellian and parameters
     dens = get_density(Fold,vpa,vperp)
     upar = get_upar(Fold, vpa, vperp, dens)
-    pressure = get_pressure(Fold, vpa, vperp, upar)
+    pressure = get_pressure(Fold, vpa, vperp, upar, ms)
     vth = sqrt(2.0*pressure/(dens*ms))
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -333,6 +333,7 @@ function numerical_error_corrections_test(;
     vperp0 = 1.0,
     vth0 = 0.5,
     atol = 1.0e-14,
+    mass = 2.0,
     print_to_screen=false,
     )
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
@@ -354,18 +355,18 @@ function numerical_error_corrections_test(;
     end
     dens = get_density(pdf_in, vpa, vperp)
     upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar)
-    vth = sqrt(2.0*pressure/dens)
-    ppar = get_ppar(pdf_in, vpa, vperp, upar)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar)
+    pressure = get_pressure(pdf_in, vpa, vperp, upar, mass)
+    vth = sqrt(2.0*pressure/(dens*mass))
+    ppar = get_ppar(pdf_in, vpa, vperp, upar, mass)
+    qpar = get_qpar(pdf_in, vpa, vperp, upar, mass)
+    rmom = get_rmom(pdf_in, vpa, vperp, upar, mass)
     # check test pdf unchanged
     if abeam == 0.5 && vpa0 == 1.0 && vperp0 == 1.0 && vth0 == 0.5
         @test isapprox(dens, 7.416900452984803, atol=atol)
         @test isapprox(upar, 0.33114644602432997, atol=atol)
         @test isapprox(vth, 1.0695323945144575, atol=atol)
-        @test isapprox(qpar, 0.29147880412034594, atol=atol)
-        @test isapprox(rmom, 27.57985752143237, atol=3*atol)
+        @test isapprox(qpar, mass*0.29147880412034594, atol=atol)
+        @test isapprox(rmom, mass*27.57985752143237, atol=6*atol)
     end
 
     CC = fkpl_arrays.CC
@@ -378,7 +379,7 @@ function numerical_error_corrections_test(;
         end
     end
     # make ad-hoc conserving corrections to remove the denisty, mean flow, and pressure
-    conserving_corrections!(CC,pdf_in,vpa,vperp)
+    conserving_corrections!(CC,pdf_in,vpa,vperp,mass)
     
     # extract result
     @inbounds begin
@@ -392,7 +393,7 @@ function numerical_error_corrections_test(;
     # check CC now has zero density, flow, and pressure moments
     dn = get_density(C_num, vpa, vperp)
     du = get_upar(C_num, vpa, vperp, 1.0)
-    dp = get_pressure(C_num, vpa, vperp, upar)
+    dp = get_pressure(C_num, vpa, vperp, upar, mass)
     @test abs(dn) < atol
     @test abs(du) < atol
     @test abs(dp) < atol
@@ -626,7 +627,7 @@ function runtests()
                      fkpl_arrays.GG, fkpl_arrays.HH, fkpl_arrays.dHdvpa, fkpl_arrays.dHdvperp,
                      fkpl_arrays.d2Gdvpa2, fkpl_arrays.dGdvperp, fkpl_arrays.d2Gdvperpdvpa,
                      fkpl_arrays.d2Gdvperp2, F_M, vpa, vperp,
-                     fkpl_arrays; algebraic_solve_for_d2Gdvperp2=false,
+                     fkpl_arrays, species.mass[1]; algebraic_solve_for_d2Gdvperp2=false,
                      calculate_GG=true, calculate_dGdvperp=true)
                 # extract C[Fs,Fs'] result
                 # and Rosenbluth potentials for testing
@@ -794,7 +795,7 @@ function runtests()
                     # enforce the boundary conditions on CC before it is used for timestepping
                     enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
                     # make ad-hoc conserving corrections
-                    conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp)
+                    conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp,ms)
                 end
                 # extract C[Fs,Fs'] result
                 @inbounds begin
@@ -833,8 +834,8 @@ function runtests()
                     @test isapprox(dSdt, rtol ; atol=atol)
                     delta_n = get_density(C_M_num, vpa, vperp)
                     delta_upar = get_upar(C_M_num, vpa, vperp, dens)
-                    delta_pressure = msp*get_pressure(C_M_num, vpa, vperp, upar)
-                    delta_ppar = msp*get_ppar(C_M_num, vpa, vperp, upar)
+                    delta_pressure = get_pressure(C_M_num, vpa, vperp, upar, msp)
+                    delta_ppar = get_ppar(C_M_num, vpa, vperp, upar, msp)
                     delta_pperp = get_pperp(delta_pressure, delta_ppar)
                     rtol, atol = 0.0, 1.0e-12
                     @test isapprox(delta_n, rtol ; atol=atol)
@@ -857,8 +858,8 @@ function runtests()
                     @test isapprox(dSdt, rtol ; atol=atol)
                     delta_n = get_density(C_M_num, vpa, vperp)
                     delta_upar = get_upar(C_M_num, vpa, vperp, dens)
-                    delta_pressure = msp*get_pressure(C_M_num, vpa, vperp, upar)
-                    delta_ppar = msp*get_ppar(C_M_num, vpa, vperp, upar)
+                    delta_pressure = get_pressure(C_M_num, vpa, vperp, upar, msp)
+                    delta_ppar = get_ppar(C_M_num, vpa, vperp, upar, msp)
                     delta_pperp = get_pperp(delta_pressure, delta_ppar)
                     rtol, atol = 0.0, 1.0e-15
                     @test isapprox(delta_n, rtol ; atol=atol)

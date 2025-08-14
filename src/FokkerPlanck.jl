@@ -121,7 +121,7 @@ function fokker_planck_self_collision_operator_weak_form!(
     enforce_vpavperp_BCs!(CC,vpa,vperp)
     # make ad-hoc conserving corrections appropriate only for the self operator
     if use_conserving_corrections
-        conserving_corrections!(CC, pdf_in, vpa, vperp)
+        conserving_corrections!(CC, pdf_in, vpa, vperp, ms)
     end
     return nothing
 end
@@ -181,7 +181,7 @@ function fokker_planck_collision_operator_weak_form!(
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
              d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,ffsp_in,
-             vpa,vperp,fkpl_arrays,
+             vpa,vperp,fkpl_arrays,msp,
              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
              calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     end
@@ -251,7 +251,7 @@ function fokker_planck_collision_operator_weak_form!(
                     dHsdvpa[:,:,is],dHsdvperp[:,:,is],
                     d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],
                     d2Gsdvperpdvpa[:,:,is],d2Gsdvperp2[:,:,is],ff_in[:,:,is],
-                    vpa,vperp,fkpl_arrays,
+                    vpa,vperp,fkpl_arrays,species.mass[is],
                     algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end
@@ -541,7 +541,7 @@ function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{
             # this introduces errors of the size of the distance between F^n+1 and the 
             # "correct" root that should have been found by the iterative solve, i.e.,
             # errors of size ~ atol.
-            conserving_corrections!(deltaF, Fold, vpa, vperp)
+            conserving_corrections!(deltaF, Fold, vpa, vperp, ms)
             # update Fnew
             @inbounds begin
                 for ivperp in 1:vperp.n

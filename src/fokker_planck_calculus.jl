@@ -2088,15 +2088,14 @@ a Maxwellian, and the multipole expansion for the remainder.
 """
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
     pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
-    vpa::finite_element_coordinate,vperp::finite_element_coordinate;
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
     calculate_GG=false,calculate_dGdvperp=false)
 
-    mass = 1.0
     dens = get_density(pdf, vpa, vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar)
+    pressure = get_pressure(pdf, vpa, vperp, upar, mass)
     vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf, vpa, vperp, upar)
+    ppar = get_ppar(pdf, vpa, vperp, upar, mass)
     pperp = get_pperp(pressure, ppar)
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -2532,7 +2531,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
              d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,
-             vpa,vperp,fkpl_arrays,
+             vpa,vperp,fkpl_arrays,msp,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
@@ -2587,7 +2586,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
                 GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
                 d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fkpl_arrays,
+                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fkpl_arrays,species.mass[is],
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -3017,7 +3016,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
              HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,dGdvperp::Tpdf,
              d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-             fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+             fkpl_arrays::fokkerplanck_weakform_arrays_struct, mass::mk_float;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false) where Tpdf <: AbstractArray{mk_float,2}
 
@@ -3049,7 +3048,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
         calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,ffsp_in,vpa,vperp,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == delta_f_multipole # use a variant of the multipole method
-        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,ffsp_in,S_dummy,vpa,vperp,
+        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,ffsp_in,S_dummy,vpa,vperp,mass,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == direct_integration  # use direct integration on the boundary
         calculate_rosenbluth_potential_boundary_data!(rpbd,bwgt,ffsp_in,vpa,vperp,
@@ -3179,7 +3178,7 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG::Tpdf,
 
     dens = get_density(ffsp_in, vpa, vperp)
     upar = get_upar(ffsp_in, vpa, vperp, dens)
-    pressure = get_pressure(ffsp_in, vpa, vperp, upar)
+    pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
     vth = sqrt(2.0*pressure/(dens*mass))
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -3474,24 +3473,25 @@ conserves density, parallel velocity and pressure of \$F_s\$.
 function conserving_corrections!(CC::AbstractArray{mk_float,2},
                             pdf_in::AbstractArray{mk_float,2},
                             vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate)
+                            vperp::finite_element_coordinate,
+                            mass::mk_float)
     # compute moments of the input pdf
     dens = get_density(pdf_in, vpa, vperp)
     upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar)
-    vth = sqrt(2.0*pressure/dens)
-    ppar = get_ppar(pdf_in, vpa, vperp, upar)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar)
+    pressure = get_pressure(pdf_in, vpa, vperp, upar, mass)
+    vth = sqrt(2.0*pressure/(dens*mass))
+    ppar = get_ppar(pdf_in, vpa, vperp, upar, mass)
+    qpar = get_qpar(pdf_in, vpa, vperp, upar, mass)
+    rmom = get_rmom(pdf_in, vpa, vperp, upar, mass)
 
     # compute moments of the numerical collision operator
     dn = get_density(CC, vpa, vperp)
     du = get_upar(CC, vpa, vperp, 1.0)
-    dp = get_pressure(CC, vpa, vperp, upar)
+    dp = get_pressure(CC, vpa, vperp, upar, mass)
     
     # form the appropriate matrix coefficients
-    b0, b1, b2 = dn, du - upar*dn, 3.0*dp
-    A00, A02, A11, A12, A22 = dens, 3.0*pressure, ppar, 2.0*qpar, rmom
+    b0, b1, b2 = mass*dn, mass*(du - upar*dn), 3.0*dp
+    A00, A02, A11, A12, A22 = mass*dens, 3.0*pressure, ppar, 2.0*qpar, rmom
 
     # obtain the coefficients for the corrections
     (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)

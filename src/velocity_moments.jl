@@ -41,25 +41,25 @@ end
 function get_ppar(ff::AbstractArray{mk_float,2},
             vpa::finite_element_coordinate,
             vperp::finite_element_coordinate,
-            upar::mk_float)
+            upar::mk_float, mass::mk_float)
     # Calculate ∫d^3v (vpa-upar)^2 ff
-    return integral((vperp,vpa)->((vpa-upar)^2), ff, vperp, vpa)
+    return mass*integral((vperp,vpa)->((vpa-upar)^2), ff, vperp, vpa)
 end
 
 function get_pressure(ff::AbstractArray{mk_float,2},
             vpa::finite_element_coordinate,
             vperp::finite_element_coordinate,
-            upar::mk_float)
+            upar::mk_float, mass::mk_float)
     # Integrating calculates
     # ∫d^3v (((vpa-upar))^2 + vperp^2) * ff
-    return (1.0/3.0)*integral((vperp,vpa)->((vpa - upar)^2 + vperp^2), ff, vperp, vpa)
+    return (mass/3.0)*integral((vperp,vpa)->((vpa - upar)^2 + vperp^2), ff, vperp, vpa)
 end
 
 function get_qpar(ff::AbstractArray{mk_float,2},
             vpa::finite_element_coordinate,
             vperp::finite_element_coordinate,
-            upar::mk_float)
-    return 0.5 *
+            upar::mk_float, mass::mk_float)
+    return 0.5 * mass *
             integral((vperp,vpa) -> (vpa-upar)*((vpa-upar)^2 + vperp^2), ff, vperp, vpa)
 end
 
@@ -67,8 +67,8 @@ end
 function get_rmom(ff::AbstractArray{mk_float,2},
             vpa::finite_element_coordinate,
             vperp::finite_element_coordinate,
-            upar::mk_float)
-    return integral((vperp,vpa)->((vpa-upar)^2 + vperp^2)^2, ff, vperp, vpa)
+            upar::mk_float, mass::mk_float)
+    return mass*integral((vperp,vpa)->((vpa-upar)^2 + vperp^2)^2, ff, vperp, vpa)
 end
 
 end
