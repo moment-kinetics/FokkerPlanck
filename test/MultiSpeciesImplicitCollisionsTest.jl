@@ -24,7 +24,7 @@ function test_multispecies_implicit_collisions(;
     ntime=1::mk_int,delta_t=1.0::mk_float,
     # nonlinear solver options
     atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
-    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=false::Bool,
+    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
     # model options
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
@@ -153,12 +153,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     using Pkg
     Pkg.activate(".")
     # run once to precompile
-    test_implicit_collisions(test_particle_preconditioner=false,test_numerical_conserving_terms=true,
+    test_multispecies_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
         vth0=[0.5,0.5],vperp0=[1.0,1.0],vpa0=[1.0,1.0],nelement_vpa=4,nelement_vperp=2,Lvpa=8.0,Lvperp=4.0,
         bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
         ntime=1, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
     # run a standard case now we are precompiled
-    test_implicit_collisions(test_particle_preconditioner=false,test_numerical_conserving_terms=true,
+    test_multispecies_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
         vth0=[0.5,0.5],vperp0=[1.0,1.0],vpa0=[1.0,1.0],nelement_vpa=32,nelement_vperp=16,Lvpa=8.0,Lvperp=4.0,
         bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
         ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false)
