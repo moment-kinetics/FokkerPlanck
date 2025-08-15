@@ -567,6 +567,18 @@ struct fokkerplanck_weakform_arrays_struct
     Fs_rhs_delta::Array{mk_float,3}
     Fsv::Array{mk_float,3}
     Fsw::Array{mk_float,3}
+    # collision operator moment arrays
+    delta_n_sp_s::Array{mk_float,2}
+    delta_m_sp_s::Array{mk_float,2}
+    delta_p_sp_s::Array{mk_float,2}
+    density::Array{mk_float,1}
+    upar::Array{mk_float,1}
+    pressure::Array{mk_float,1}
+    ppar::Array{mk_float,1}
+    qpar::Array{mk_float,1}
+    rmom::Array{mk_float,1}
+    # conserving correction coefficients
+    correction_coeffs_z::Array{mk_float,3}
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
@@ -660,6 +672,16 @@ struct fokkerplanck_weakform_arrays_struct
         Fs_rhs_delta = allocate_float(nvpa,nvperp,nspecies)
         Fsv = allocate_float(nvpa,nvperp,nspecies)
         Fsw = allocate_float(nvpa,nvperp,nspecies)
+        delta_n_sp_s = allocate_float(nspecies,nspecies)
+        delta_m_sp_s = allocate_float(nspecies,nspecies)
+        delta_p_sp_s = allocate_float(nspecies,nspecies)
+        density = allocate_float(nspecies)
+        upar = allocate_float(nspecies)
+        pressure = allocate_float(nspecies)
+        ppar = allocate_float(nspecies)
+        qpar = allocate_float(nspecies)
+        rmom = allocate_float(nspecies)
+        correction_coeffs_z = allocate_float(3,nspecies,nspecies)
         return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
                     MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
                     KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
@@ -673,7 +695,9 @@ struct fokkerplanck_weakform_arrays_struct
                     CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
                     rhs_advection,
                     nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
-                    nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw)
+                    nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
+                    delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
+                    density, upar, pressure, ppar, qpar, rmom, correction_coeffs_z)
     end
 end
 
@@ -3546,7 +3570,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,2},
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
-    (int_vpa_C, int_vpa2_C, int_vperp2_C) = get_collision_moments(pdf_in, 1.0, 1.0, 1.0, fkpl_arrays)
+    (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = get_collision_moments(pdf_in, 1.0, 1.0, 1.0, fkpl_arrays)
 
     # compute moments of the input pdf
     dens = get_density(pdf_in, vpa, vperp)
@@ -3585,6 +3609,87 @@ function conserving_corrections!(CC::AbstractArray{mk_float,2},
             end
         end
     end
+end
+function conserving_corrections!(CC::AbstractArray{mk_float,3},
+                            pdf_in::AbstractArray{mk_float,3}, nuref::mk_float,
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    @inbounds begin
+        # calculate necessary moments and store in fkpl_arrays
+        calculate_collision_moments!(pdf_in,nuref,fkpl_arrays)
+        # extract precomputed variables
+        vpa = fkpl_arrays.vpa
+        vperp = fkpl_arrays.vperp
+        species = fkpl_arrays.species
+        mass = species.mass
+        # moments of collisions for each cross-species pair
+        delta_n_sp_s = fkpl_arrays.delta_n_sp_s
+        delta_m_sp_s = fkpl_arrays.delta_m_sp_s
+        delta_p_sp_s = fkpl_arrays.delta_p_sp_s
+        # moments of the pdf for each species
+        density = fkpl_arrays.density
+        upar = fkpl_arrays.upar
+        pressure = fkpl_arrays.pressure
+        ppar = fkpl_arrays.ppar
+        qpar = fkpl_arrays.qpar
+        rmom = fkpl_arrays.rmom
+        # correction coefficients
+        zcoeffs = fkpl_arrays.correction_coeffs_z
+        # first get the correction coefficients
+        for is in 1:species.n
+            # self collision terms
+            # form the appropriate matrix coefficients
+            b0, b1, b2 = mass[is]*delta_n_sp_s[is,is], delta_m_sp_s[is,is], 3.0*delta_p_sp_s[is,is]
+            A00, A02, A11, A12, A22 = mass[is]*density[is], 3.0*pressure[is], ppar[is], 2.0*qpar[is], rmom[is]
+            # obtain the coefficients for the corrections
+            (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
+            zcoeffs[1,is,is] = x0
+            zcoeffs[2,is,is] = x1
+            zcoeffs[3,is,is] = x2
+            # cross species terms
+            for isp in is+1:species.n
+                A00 = mass[is]*density[is]
+                A03 = 3.0*pressure[is]
+                A11 = mass[isp]*density[isp]
+                A13 = 3.0*pressure[isp]
+                A22 = ppar[is] + ppar[isp]
+                A23 = 2*(qpar[is]+qpar[isp])
+                A32 = A23 + (ppar[is] - ppar[isp])*(upar[is] - upar[isp])
+                A33 = rmom[is] + rmom[isp] + 2.0*(qpar[is] - qpar[isp])*(upar[is] - upar[isp])
+                b0 = mass[is]*delta_n_sp_s[isp,is]
+                b1 = mass[isp]*delta_n_sp_s[is,isp]
+                b2 = delta_m_sp_s[isp,is] + delta_m_sp_s[is,isp]
+                b3 = (3.0*(delta_p_sp_s[isp,is] + delta_p_sp_s[is,isp]) +
+                    (upar[is] - upar[isp])*(delta_m_sp_s[isp,is] - delta_m_sp_s[is,isp]))
+                # obtain the coefficients for the corrections
+                (x0, x1, x2, x3) = symmetric_matrix_inverse(A00,A03,A11,A13,
+                                                            A22,A23,A32,A33,
+                                                            b0,b1,b2,b3)
+                # corrections for species s
+                zcoeffs[1,isp,is] = x0
+                zcoeffs[2,isp,is] = x2
+                zcoeffs[3,isp,is] = x3
+                # corrections for species s'
+                zcoeffs[1,is,isp] = x1
+                zcoeffs[2,is,isp] = x2
+                zcoeffs[3,is,isp] = x3
+            end
+        end
+        # correct CC
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    wpar = vpa.grid[ivpa] - upar[is]
+                    for isp in 1:species.n
+                        x0 = zcoeffs[1,isp,is]
+                        x1 = zcoeffs[2,isp,is]
+                        x2 = zcoeffs[3,isp,is]
+                        CC[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp,is]
+                    end
+                end
+            end
+        end
+    end # @inbounds
+    return nothing
 end
 
 """
@@ -3639,6 +3744,68 @@ function get_collision_moments(pdf_in::AbstractArray{mk_float,2},
         vpa,vperp,YY_arrays)
     return int_C_vec
 end
+function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
+    nuref::mk_float,fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    # call the lower level function after expanding some variables
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    mass = species.mass
+    zeds = species.zeds
+    YY_arrays = fkpl_arrays.YY_arrays
+    # Rosenbluth potentials for each species
+    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
+    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
+    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
+    dHsdvperp = fkpl_arrays.dHsdvperp
+    dHsdvpa = fkpl_arrays.dHsdvpa
+    # Rosenbluth potentials for passing into function
+    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
+    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
+    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
+    dHdvperp = fkpl_arrays.dHdvperp
+    dHdvpa = fkpl_arrays.dHdvpa
+    # moments of collisions for each cross-species pair
+    delta_n_sp_s = fkpl_arrays.delta_n_sp_s
+    delta_m_sp_s = fkpl_arrays.delta_m_sp_s
+    delta_p_sp_s = fkpl_arrays.delta_p_sp_s
+    # moments of the pdf for each species
+    density = fkpl_arrays.density
+    upar = fkpl_arrays.upar
+    pressure = fkpl_arrays.pressure
+    ppar = fkpl_arrays.ppar
+    qpar = fkpl_arrays.qpar
+    rmom = fkpl_arrays.rmom
+    # collect the calculated moments
+    for is in 1:species.n
+        @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
+        @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
+        @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+    end
+    # collect the collision integrals
+    for is in 1:species.n
+        for isp in 1:species.n
+            G_factor = (zeds[is]*zeds[isp]/mass[is])^2
+            H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
+            @views @. d2Gdvperp2 = d2Gsdvperp2[:,:,isp]*G_factor
+            @views @. d2Gdvperpdvpa = d2Gsdvperpdvpa[:,:,isp]*G_factor
+            @views @. d2Gdvpa2 = d2Gsdvpa2[:,:,isp]*G_factor
+            @views @. dHdvpa = dHsdvpa[:,:,isp]*H_factor
+            @views @. dHdvperp = dHsdvperp[:,:,isp]*H_factor
+            @views (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = integrate_collision_moments(pdf_in[:,:,is],d2Gdvpa2,d2Gdvperpdvpa,
+                d2Gdvperp2,dHdvpa,dHdvperp,1.0,1.0,nuref,
+                vpa,vperp,YY_arrays)
+            delta_n_sp_s[isp,is] = int_C
+            delta_m_sp_s[isp,is] = mass[is]*(int_vpa_C - upar[is]*int_C)
+            delta_p_sp_s[isp,is] = (mass[is]/3.0)*(int_vpa2_C - 2*upar[is]*int_vpa_C
+                                     + (upar[is]^2)*int_C + int_vperp2_C)
+        end
+    end
+    return nothing
+end
 
 function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
     d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,
@@ -3648,10 +3815,11 @@ function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
     vperp::finite_element_coordinate,
     YY_arrays::YY_collision_operator_arrays) where Tpdf <: AbstractArray{mk_float,2}
 
+    int_C = 0.0 # by construction
     int_vpa_C = 0.0
     int_vpa2_C = 0.0
     int_vperp2_C = 0.0
-    int_C_vec = [int_vpa_C, int_vpa2_C, int_vperp2_C]
+    int_C_vec = [int_C, int_vpa_C, int_vpa2_C, int_vperp2_C]
     @inbounds begin
         # assemble integrals of collision operator
         # loop over elements
@@ -3682,20 +3850,20 @@ function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
                                 # carry out the matrix sum on each 2D element
                                 # the three lines represent parallel flux terms
                                 # int_vpa_C
-                                int_C_vec[1] += -(2.0*pi)*
+                                int_C_vec[2] += -(2.0*pi)*
                                                 nussp*pdfjj*(PPpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*d2Gspdvpa2[kvpap,kvperpp] +
                                                             MMpar[kvpap_local,jvpap_local]*PPperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] -
                                                             2.0*(ms/msp)*MMpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*dHspdvpa[kvpap,kvperpp]
                                                             )
                                 # the three lines represent parallel flux terms
                                 # int_vpa2_C
-                                int_C_vec[2] += -(2.0*pi)*
+                                int_C_vec[3] += -(2.0*pi)*
                                                     2.0*nussp*pdfjj*(PUpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*d2Gspdvpa2[kvpap,kvperpp] +
                                                                     MRpar[kvpap_local,jvpap_local]*PPperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] -
                                                                     2.0*(ms/msp)*MRpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*dHspdvpa[kvpap,kvperpp])
                                 # the three lines represent perpendicular flux terms
                                 # int_vperp2_C
-                                int_C_vec[3] += -(2.0*pi)*
+                                int_C_vec[4] += -(2.0*pi)*
                                                     2.0*nussp*pdfjj*(PPpar[kvpap_local,jvpap_local]*MRperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] +
                                                                     MMpar[kvpap_local,jvpap_local]*PUperp[kvperpp_local,jvperpp_local]*d2Gspdvperp2[kvpap,kvperpp] -
                                                                     2.0*(ms/msp)*MMpar[kvpap_local,jvpap_local]*MRperp[kvperpp_local,jvperpp_local]*dHspdvperp[kvpap,kvperpp])

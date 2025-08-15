@@ -21,6 +21,7 @@ struct moments_struct
     ppar::Vector{mk_float}
     qpar::Vector{mk_float}
     rmom::Vector{mk_float}
+    conserved::Vector{mk_float}
     function moments_struct(nspecies::mk_int)
         density = allocate_float(nspecies)
         upar = allocate_float(nspecies)
@@ -29,7 +30,8 @@ struct moments_struct
         ppar = allocate_float(nspecies)
         qpar = allocate_float(nspecies)
         rmom = allocate_float(nspecies)
-        return new(density, upar, vth, pressure, ppar, qpar, rmom)
+        conserved = allocate_float(nspecies+2)
+        return new(density, upar, vth, pressure, ppar, qpar, rmom, conserved)
     end
 end
 
@@ -144,11 +146,20 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     total_parallel_momentum = calculate_total_parallel_momentum(moments,species)
     total_energy = calculate_total_energy(moments,species)
     dSdt = calculate_entropy_production(pdf,fkpl_arrays)
+    if it == 0
+        # store conserved quantities
+        moments.conserved[1:species.n] .= moments.density
+        moments.conserved[species.n+1] = total_parallel_momentum
+        moments.conserved[species.n+2] = total_energy
+    end
     println("dens: ", moments.density)
     println("temp: ", moments.pressure./moments.density)
     println("parallel momentum: ", total_parallel_momentum)
     println("total energy: ", total_energy)
     println("dSdt: ", dSdt)
+    println("delta density: ", moments.density .- moments.conserved[1:species.n])
+    println("delta momentum: ", total_parallel_momentum - moments.conserved[species.n+1])
+    println("delta energy: ", total_energy - moments.conserved[species.n+2])
     if vpa.bc == zero_boundary_condition
         for is in 1:species.n
             println("test vpa bc: F[1, :, $is]", pdf[1, :, is])

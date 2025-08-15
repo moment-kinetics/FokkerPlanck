@@ -276,6 +276,10 @@ function fokker_planck_collision_operator_weak_form!(
         # invert mass matrix and fill fc
         ldiv!(sc, lu_obj_MM, rhsc)
     end
+    if use_conserving_corrections
+        # apply multi-species conserving terms
+        conserving_corrections!(CCs, ff_in, nuref, fkpl_arrays)
+    end
     return nothing
 end
 
