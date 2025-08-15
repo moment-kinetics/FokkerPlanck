@@ -3459,6 +3459,32 @@ function symmetric_matrix_inverse(A00::mk_float,A01::mk_float,A02::mk_float,
 end
 
 """
+Function that solves `A x = b` for a nearly-symmetric matrix of the form
+```math
+\\begin{array}{cccc}
+A_{00} & 0      & 0      & A_{03} \\\\
+0      & A_{11} & 0      & A_{13} \\\\
+0      & 0      & A_{22} & A_{23} \\\\
+A_{03} & A_{13} & A_{32} & A_{33}\\\\
+\\end{array}
+```
+appropriate for cross-species numerical conserving terms.
+
+"""
+function symmetric_matrix_inverse(A00::mk_float,A03::mk_float,A11::mk_float,A13::mk_float,
+                            A22::mk_float,A23::mk_float,A32::mk_float,A33::mk_float,
+                            b0::mk_float,b1::mk_float,b2::mk_float,b3::mk_float)
+    # matrix determinant
+    detA = (A00*A11*A22*A33 - A00*A11*A23*A32 - A00*A13^2*A22 - A03^2*A11*A22)
+    # solve A x = b
+    x0 = ( -A03*A11*A22*b3 + A03*A11*A32*b2 + A03*A13*A22*b1 + A11*A22*A33*b0 - A11*A23*A32*b0 - A13^2*A22*b0)/detA
+    x1 = ( -A00*A13*A22*b3 + A00*A13*A32*b2 + A00*A22*A33*b1 - A00*A23*A32*b1 - A03^2*A22*b1 + A03*A13*A22*b0)/detA
+    x2 = ( -A00*A11*A23*b3 + A00*A11*A33*b2 - A00*A13^2*b2 + A00*A13*A23*b1 - A03^2*A11*b2 + A03*A11*A23*b0 )/detA
+    x3 = (  A00*A11*A22*b3 - A00*A11*A32*b2 - A00*A13*A22*b1 - A03*A11*A22*b0 )/ detA
+    return x0, x1, x2, x3
+end
+
+"""
 Function that applies numerical-error correcting terms to ensure
 numerical conservation of the moments `density, upar, pressure` in the self-collision operator.
 Modifies the collision operator such that the operator becomes
