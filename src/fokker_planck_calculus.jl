@@ -362,8 +362,12 @@ struct YY_collision_operator_arrays
     YYNpar::Array{mk_float,5}
     # MMpar[i,j,iel] = \int phi_i(vpa) phi_j(vpa) d vpa
     MMpar::Array{mk_float,3}
+    # MRpar[i,j,iel] = \int phi_i(vpa) phi_j(vpa) vpa d vpa
+    MRpar::Array{mk_float,3}
     # PPpar[i,j,iel] = \int phi_i(vpa) phi'_j(vpa) d vpa
     PPpar::Array{mk_float,3}
+    # PUpar[i,j,iel] = \int phi_i(vpa) phi'_j(vpa) vpa d vpa
+    PUpar::Array{mk_float,3}
     # KKpar[i,j,iel] = -\int phi'_i(vpa) phi'_j(vpa) d vpa
     KKpar::Array{mk_float,3}
     # KKpar[i,j,iel] = -\int phi'_i(vpa) phi'_j(vpa) d vpa
@@ -387,7 +391,9 @@ struct YY_collision_operator_arrays
 
         YYNpar = Array{mk_float,5}(undef,4,vpa.ngrid,vpa.ngrid,vpa.ngrid,vpa.nelement)
         MMpar = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
+        MRpar = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
         PPpar = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
+        PUpar = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
         KKpar = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
         KKpar_with_BC_terms = Array{mk_float,3}(undef,vpa.ngrid,vpa.ngrid,vpa.nelement)
 
@@ -419,7 +425,9 @@ struct YY_collision_operator_arrays
             @views YYNpar[3,:,:,:,ielement_vpa] = finite_element_matrix(lagrange_x,d_lagrange_dx,d_lagrange_dx,0,element_data)
             @views YYNpar[4,:,:,:,ielement_vpa] = finite_element_matrix(lagrange_x,d_lagrange_dx,lagrange_x,0,element_data)
             @views MMpar[:,:,ielement_vpa] = finite_element_matrix(lagrange_x,lagrange_x,0,element_data)
+            @views MRpar[:,:,ielement_vpa] = finite_element_matrix(lagrange_x,lagrange_x,1,element_data)
             @views PPpar[:,:,ielement_vpa] = finite_element_matrix(lagrange_x,d_lagrange_dx,0,element_data)
+            @views PUpar[:,:,ielement_vpa] = finite_element_matrix(lagrange_x,d_lagrange_dx,1,element_data)
             @views KKpar[:,:,ielement_vpa] = -finite_element_matrix(d_lagrange_dx,d_lagrange_dx,0,element_data)
             @views KKpar_with_BC_terms[:,:,ielement_vpa] .= KKpar[:,:,ielement_vpa]
             if ielement_vpa == 1
@@ -435,7 +443,8 @@ struct YY_collision_operator_arrays
                 PQperp,PPperp,PUperp,
                 KKperp,KJperp,KKperp_with_BC_terms,
                 YYNpar,
-                MMpar,PPpar,KKpar,KKpar_with_BC_terms)
+                MMpar,MRpar,PPpar,PUpar,
+                KKpar,KKpar_with_BC_terms)
     end
 end
 
@@ -3532,6 +3541,51 @@ function conserving_corrections!(CC::AbstractArray{mk_float,2},
         end
     end
 end
+function conserving_corrections!(CC::AbstractArray{mk_float,2},
+                            pdf_in::AbstractArray{mk_float,2},
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    (int_vpa_C, int_vpa2_C, int_vperp2_C) = get_collision_moments(pdf_in, 1.0, 1.0, 1.0, fkpl_arrays)
+
+    # compute moments of the input pdf
+    dens = get_density(pdf_in, vpa, vperp)
+    upar = get_upar(pdf_in, vpa, vperp, dens)
+    pressure = get_pressure(pdf_in, vpa, vperp, upar)
+    vth = sqrt(2.0*pressure/dens)
+    ppar = get_ppar(pdf_in, vpa, vperp, upar)
+    qpar = get_qpar(pdf_in, vpa, vperp, upar)
+    rmom = get_rmom(pdf_in, vpa, vperp, upar)
+
+    # compute moments of the numerical collision operator
+    dn = get_density(CC, vpa, vperp)
+    du = get_upar(CC, vpa, vperp, 1.0)
+    dp = get_pressure(CC, vpa, vperp, upar)
+
+    println("dn: ", dn)
+    println("int_vpa_C: ", int_vpa_C, " du: ", du)
+    println("int_vpa_C - du: ", int_vpa_C - du)
+    int_w2_C = int_vpa2_C + int_vperp2_C - 2.0*upar*int_vpa_C
+    println("(1/3)*int_w2_C: ", (1.0/3.0)*int_w2_C, " dp: ", dp)
+    println("(1/3)*int_w2_C - dp: ", (1.0/3.0)*int_w2_C -  dp)
+
+    # form the appropriate matrix coefficients
+    b0, b1, b2 = dn, du - upar*dn, 3.0*dp
+    A00, A02, A11, A12, A22 = dens, 3.0*pressure, ppar, 2.0*qpar, rmom
+
+    # obtain the coefficients for the corrections
+    (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
+
+    # correct CC
+    @inbounds begin
+        for ivperp in 1:vperp.n
+            for ivpa in 1:vpa.n
+                wpar = vpa.grid[ivpa] - upar
+                CC[ivpa,ivperp] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp]
+            end
+        end
+    end
+end
 
 """
 Function that applies a numerical-error correcting term to ensure
@@ -3565,5 +3619,94 @@ function density_conserving_correction!(CC::AbstractArray{mk_float,2},
     end
 end
 
+##
+# element-wise integration function to get moments of C(vpa,vperp) without assembling C
+##
+function get_collision_moments(pdf_in::AbstractArray{mk_float,2},
+    ms::mk_float, msp::mk_float, nussp::mk_float,
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    # call the lower level function after expanding some variables
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    YY_arrays = fkpl_arrays.YY_arrays
+    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
+    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
+    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
+    dHdvperp = fkpl_arrays.dHdvperp
+    dHdvpa = fkpl_arrays.dHdvpa
+    int_C_vec = integrate_collision_moments(pdf_in,d2Gdvpa2,d2Gdvperpdvpa,
+        d2Gdvperp2,dHdvpa,dHdvperp,ms,msp,nussp,
+        vpa,vperp,YY_arrays)
+    return int_C_vec
+end
+
+function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
+    d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,
+    d2Gspdvperp2::Tpdf,dHspdvpa::Tpdf,dHspdvperp::Tpdf,
+    ms::mk_float,msp::mk_float,nussp::mk_float,
+    vpa::finite_element_coordinate,
+    vperp::finite_element_coordinate,
+    YY_arrays::YY_collision_operator_arrays) where Tpdf <: AbstractArray{mk_float,2}
+
+    int_vpa_C = 0.0
+    int_vpa2_C = 0.0
+    int_vperp2_C = 0.0
+    int_C_vec = [int_vpa_C, int_vpa2_C, int_vperp2_C]
+    @inbounds begin
+        # assemble integrals of collision operator
+        # loop over elements
+        for ielement_vperp in 1:vperp.nelement
+            MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
+            MRperp = YY_arrays.MRperp[:,:,ielement_vperp]
+            PPperp = YY_arrays.PPperp[:,:,ielement_vperp]
+            PUperp = YY_arrays.PUperp[:,:,ielement_vperp]
+            #println("MMperp: ", MMperp)
+            #println("PPperp: ",PPperp)
+            for ielement_vpa in 1:vpa.nelement
+                MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
+                MRpar = YY_arrays.MRpar[:,:,ielement_vpa]
+                PPpar = YY_arrays.PPpar[:,:,ielement_vpa]
+                PUpar = YY_arrays.PUpar[:,:,ielement_vpa]
+                #println("MMpar: ", MMpar)
+                #println("PPpar: ", PPpar)
+                # loop over field positions in each element
+                for jvperpp_local in 1:vperp.ngrid
+                    jvperpp = vperp.igrid_full[jvperpp_local,ielement_vperp]
+                    for kvperpp_local in 1:vperp.ngrid
+                        kvperpp = vperp.igrid_full[kvperpp_local,ielement_vperp]
+                        for jvpap_local in 1:vpa.ngrid
+                            jvpap = vpa.igrid_full[jvpap_local,ielement_vpa]
+                            pdfjj = pdfs[jvpap,jvperpp]
+                            for kvpap_local in 1:vpa.ngrid
+                                kvpap = vpa.igrid_full[kvpap_local,ielement_vpa]
+                                # carry out the matrix sum on each 2D element
+                                # the three lines represent parallel flux terms
+                                # int_vpa_C
+                                int_C_vec[1] += -(2.0*pi)*
+                                                nussp*pdfjj*(PPpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*d2Gspdvpa2[kvpap,kvperpp] +
+                                                            MMpar[kvpap_local,jvpap_local]*PPperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] -
+                                                            2.0*(ms/msp)*MMpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*dHspdvpa[kvpap,kvperpp]
+                                                            )
+                                # the three lines represent parallel flux terms
+                                # int_vpa2_C
+                                int_C_vec[2] += -(2.0*pi)*
+                                                    2.0*nussp*pdfjj*(PUpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*d2Gspdvpa2[kvpap,kvperpp] +
+                                                                    MRpar[kvpap_local,jvpap_local]*PPperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] -
+                                                                    2.0*(ms/msp)*MRpar[kvpap_local,jvpap_local]*MMperp[kvperpp_local,jvperpp_local]*dHspdvpa[kvpap,kvperpp])
+                                # the three lines represent perpendicular flux terms
+                                # int_vperp2_C
+                                int_C_vec[3] += -(2.0*pi)*
+                                                    2.0*nussp*pdfjj*(PPpar[kvpap_local,jvpap_local]*MRperp[kvperpp_local,jvperpp_local]*d2Gspdvperpdvpa[kvpap,kvperpp] +
+                                                                    MMpar[kvpap_local,jvpap_local]*PUperp[kvperpp_local,jvperpp_local]*d2Gspdvperp2[kvpap,kvperpp] -
+                                                                    2.0*(ms/msp)*MMpar[kvpap_local,jvpap_local]*MRperp[kvperpp_local,jvperpp_local]*dHspdvperp[kvpap,kvperpp])
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return int_C_vec
+end
 
 end
