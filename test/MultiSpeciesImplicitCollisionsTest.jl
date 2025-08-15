@@ -96,8 +96,8 @@ function test_multispecies_implicit_collisions(;
     # store initial pdf for output
     Fout[:,:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
-    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays)
-                #, use_conserving_corrections=test_numerical_conserving_terms)
+    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays,
+             use_conserving_corrections=test_numerical_conserving_terms)
     # print diagnostic info to screen
     if print_diagnostics
         diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,0)

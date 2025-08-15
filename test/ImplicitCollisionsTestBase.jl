@@ -51,6 +51,20 @@ function calculate_total_energy(moments::moments_struct,species::species_info)
     end
     return total_energy
 end
+function calculate_total_change(fkpl_arrays)
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    mass = species.mass
+    CCs = fkpl_arrays.CCs
+    total_momentum_change = 0.0
+    total_energy_change = 0.0
+    for is in 1:species.n
+        @views total_momentum_change += mass[is]*get_upar(CCs[:,:,is],vpa,vperp,1.0)
+        @views total_energy_change += 3.0*get_pressure(CCs[:,:,is],vpa,vperp,0.0,mass[is])
+    end
+    return total_momentum_change, total_energy_change
+end
 
 function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     # extract coordinates
@@ -146,6 +160,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     total_parallel_momentum = calculate_total_parallel_momentum(moments,species)
     total_energy = calculate_total_energy(moments,species)
     dSdt = calculate_entropy_production(pdf,fkpl_arrays)
+    delta_momentum_C, delta_energy_C = calculate_total_change(fkpl_arrays)
     if it == 0
         # store conserved quantities
         moments.conserved[1:species.n] .= moments.density
@@ -160,6 +175,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     println("delta density: ", moments.density .- moments.conserved[1:species.n])
     println("delta momentum: ", total_parallel_momentum - moments.conserved[species.n+1])
     println("delta energy: ", total_energy - moments.conserved[species.n+2])
+    println("delta_momentum_C: ",delta_momentum_C, " delta_energy_C: ", delta_energy_C)
     if vpa.bc == zero_boundary_condition
         for is in 1:species.n
             println("test vpa bc: F[1, :, $is]", pdf[1, :, is])
