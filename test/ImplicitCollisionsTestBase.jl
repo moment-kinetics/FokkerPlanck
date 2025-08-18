@@ -168,6 +168,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
         moments.conserved[species.n+2] = total_energy
     end
     println("dens: ", moments.density)
+    println("upar: ", moments.upar)
     println("temp: ", moments.pressure./moments.density)
     println("parallel momentum: ", total_parallel_momentum)
     println("total energy: ", total_energy)
