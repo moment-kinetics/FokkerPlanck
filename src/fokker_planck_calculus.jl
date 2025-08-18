@@ -3708,8 +3708,8 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
     end # @inbounds
     return nothing
 end
-function conserving_corrections!(pdf::AbstractArray{mk_float,3},
-                            delta_pdf::AbstractArray{mk_float,3},
+function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
+                            pdf_old::AbstractArray{mk_float,3},
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -3725,47 +3725,63 @@ function conserving_corrections!(pdf::AbstractArray{mk_float,3},
     delta_n = fkpl_arrays.delta_n
     delta_P = fkpl_arrays.delta_P
     delta_E = fkpl_arrays.delta_E
-    for is in 1:species.n
-        # compute moments of the input pdfs
-        @views density[is] = get_density(pdf[:,:,is], vpa, vperp)
-        @views upar[is] = get_upar(pdf[:,:,is], vpa, vperp, density[is])
-        @views pressure[is] = get_pressure(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views ppar[is] = get_ppar(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views qpar[is] = get_qpar(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views rmom[is] = get_rmom(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
-        # compute necessary moments of delta_pdf
-        @views delta_n[is] = get_density(delta_pdf[:,:,is], vpa, vperp)
-        @views delta_P[is] = mass[is]*get_upar(delta_pdf[:,:,is], vpa, vperp, 1.0)
-        @views delta_E[is] = 0.5*get_pressure(delta_pdf[:,:,is], vpa, vperp, 0.0, mass[is])
-    end
 
-    b0, b1 = 0.0, 0.0
-    A00, A01, A10, A11 =  0.0, 0.0, 0.0, 0.0
-    for is in 1:species.n
-        b0 += delta_P[is] - mass[is]*upar[is]*delta_n[is]
-        b1 += 2.0*delta_E[is] - delta_n[is]*(mass[is]*upar[is]^2 + 3.0*pressure[is]/density[is])
-        A00 += ppar[is]
-        A01 += 2.0*qpar[is]
-        A10 += 2.0*(qpar[is] + ppar[is]*upar[is])
-        A11 += rmom[is] + 4.0*upar[is]*qpar[is] - 9.0*(pressure[is]^2)/(mass[is]*density[is])
-    end
-
-    # obtain the coefficients for the corrections
-    (x1, x2) = matrix_inverse(A00,A01,A10,A11,b0,b1)
-
-    # correct CC
+    # compute deltaF = F* - F^n, where F* is the Fnew from the uncorrected FP solve
+    # use Fsw as a dummy array (vpa,vperp,species)
+    # as this is now free after leaving newton_solve!()
+    delta_pdf = fkpl_arrays.Fsw
     @inbounds begin
+        for is in 1:species.n
+            @views enforce_vpavperp_BCs!(pdf_new[:,:,is],vpa,vperp)
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    delta_pdf[ivpa,ivperp,is] = pdf_new[ivpa,ivperp,is] - pdf_old[ivpa,ivperp,is]
+                end
+            end
+        end
+
+        for is in 1:species.n
+            # compute moments of the input pdf_new
+            @views density[is] = get_density(pdf_new[:,:,is], vpa, vperp)
+            @views upar[is] = get_upar(pdf_new[:,:,is], vpa, vperp, density[is])
+            @views pressure[is] = get_pressure(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views ppar[is] = get_ppar(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views qpar[is] = get_qpar(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views rmom[is] = get_rmom(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
+            # compute necessary moments of delta_pdf
+            @views delta_n[is] = get_density(delta_pdf[:,:,is], vpa, vperp)
+            @views delta_P[is] = mass[is]*get_upar(delta_pdf[:,:,is], vpa, vperp, 1.0)
+            @views delta_E[is] = 1.5*get_pressure(delta_pdf[:,:,is], vpa, vperp, 0.0, mass[is])
+        end
+
+        b0, b1 = 0.0, 0.0
+        A00, A01, A10, A11 =  0.0, 0.0, 0.0, 0.0
+        for is in 1:species.n
+            b0 += delta_P[is] - mass[is]*upar[is]*delta_n[is]
+            b1 += 2.0*delta_E[is] - delta_n[is]*(mass[is]*upar[is]^2 + 3.0*pressure[is]/density[is])
+            A00 += ppar[is]
+            A01 += 2.0*qpar[is]
+            A10 += 2.0*(qpar[is] + ppar[is]*upar[is])
+            A11 += rmom[is] + 4.0*upar[is]*qpar[is] - 9.0*(pressure[is]^2)/(mass[is]*density[is])
+        end
+
+        # obtain the coefficients for the corrections
+        (x1, x2) = matrix_inverse(A00,A01,A10,A11,b0,b1)
+
+        # correct pdf_new with polynomial correction * pdf_new
         for is in 1:species.n
             x0 = (delta_n[is]/density[is]) - 3.0*(pressure[is]/(mass[is]*density[is]))*x2
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
                     wpar = vpa.grid[ivpa] - upar[is]
-                    pdf[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf[ivpa,ivperp,is]
+                    pdf_new[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_new[ivpa,ivperp,is]
                 end
             end
         end
     end
+    return nothing
 end
+
 """
 Function that applies a numerical-error correcting term to ensure
 numerical conservation of the `density` in the collision operator.
