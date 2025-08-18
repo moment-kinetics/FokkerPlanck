@@ -577,6 +577,9 @@ struct fokkerplanck_weakform_arrays_struct
     ppar::Array{mk_float,1}
     qpar::Array{mk_float,1}
     rmom::Array{mk_float,1}
+    delta_n::Array{mk_float,1}
+    delta_P::Array{mk_float,1}
+    delta_E::Array{mk_float,1}
     # conserving correction coefficients
     correction_coeffs_z::Array{mk_float,3}
     """
@@ -681,6 +684,9 @@ struct fokkerplanck_weakform_arrays_struct
         ppar = allocate_float(nspecies)
         qpar = allocate_float(nspecies)
         rmom = allocate_float(nspecies)
+        delta_n = allocate_float(nspecies)
+        delta_P = allocate_float(nspecies)
+        delta_E = allocate_float(nspecies)
         correction_coeffs_z = allocate_float(3,nspecies,nspecies)
         return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
                     MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
@@ -697,7 +703,8 @@ struct fokkerplanck_weakform_arrays_struct
                     nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
                     nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
-                    density, upar, pressure, ppar, qpar, rmom, correction_coeffs_z)
+                    density, upar, pressure, ppar, qpar, rmom,
+                    delta_n, delta_P, delta_E, correction_coeffs_z)
     end
 end
 
@@ -3504,7 +3511,7 @@ A_{03} & A_{13} & A_{32} & A_{33}\\\\
 appropriate for cross-species numerical conserving terms.
 
 """
-function symmetric_matrix_inverse(A00::mk_float,A03::mk_float,A11::mk_float,A13::mk_float,
+function matrix_inverse(A00::mk_float,A03::mk_float,A11::mk_float,A13::mk_float,
                             A22::mk_float,A23::mk_float,A32::mk_float,A33::mk_float,
                             b0::mk_float,b1::mk_float,b2::mk_float,b3::mk_float)
     # matrix determinant
@@ -3515,6 +3522,15 @@ function symmetric_matrix_inverse(A00::mk_float,A03::mk_float,A11::mk_float,A13:
     x2 = ( -A00*A11*A23*b3 + A00*A11*A33*b2 - A00*A13^2*b2 + A00*A13*A23*b1 - A03^2*A11*b2 + A03*A11*A23*b0 )/detA
     x3 = (  A00*A11*A22*b3 - A00*A11*A32*b2 - A00*A13*A22*b1 - A03*A11*A22*b0 )/ detA
     return x0, x1, x2, x3
+end
+function matrix_inverse(A00::mk_float,A01::mk_float,A10::mk_float,A11::mk_float,
+                        b0::mk_float,b1::mk_float)
+    # matrix determinant
+    detA = A00*A11 - A01*A10
+    # solve A x = b
+    x0 = (b0*A11 - b1*A01)/detA
+    x1 = (-b0*A10 + b1*A00)/detA
+    return x0, x1
 end
 
 """
@@ -3661,9 +3677,9 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
                 b3 = (3.0*(delta_p_sp_s[isp,is] + delta_p_sp_s[is,isp]) +
                     (upar[is] - upar[isp])*(delta_m_sp_s[isp,is] - delta_m_sp_s[is,isp]))
                 # obtain the coefficients for the corrections
-                (x0, x1, x2, x3) = symmetric_matrix_inverse(A00,A03,A11,A13,
-                                                            A22,A23,A32,A33,
-                                                            b0,b1,b2,b3)
+                (x0, x1, x2, x3) = matrix_inverse(A00,A03,A11,A13,
+                                                    A22,A23,A32,A33,
+                                                    b0,b1,b2,b3)
                 # corrections for species s
                 zcoeffs[1,isp,is] = x0
                 zcoeffs[2,isp,is] = x2
@@ -3691,7 +3707,64 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
     end # @inbounds
     return nothing
 end
+function conserving_corrections!(pdf::AbstractArray{mk_float,3},
+                            delta_pdf::AbstractArray{mk_float,3},
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    mass = species.mass
+    # moments of the pdf for each species
+    density = fkpl_arrays.density
+    upar = fkpl_arrays.upar
+    pressure = fkpl_arrays.pressure
+    ppar = fkpl_arrays.ppar
+    qpar = fkpl_arrays.qpar
+    rmom = fkpl_arrays.rmom
+    delta_n = fkpl_arrays.delta_n
+    delta_P = fkpl_arrays.delta_P
+    delta_E = fkpl_arrays.delta_E
+    for is in 1:species.n
+        # compute moments of the input pdfs
+        @views density[is] = get_density(pdf[:,:,is], vpa, vperp)
+        @views upar[is] = get_upar(pdf[:,:,is], vpa, vperp, density[is])
+        @views pressure[is] = get_pressure(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views ppar[is] = get_ppar(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views qpar[is] = get_qpar(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
+        @views rmom[is] = get_rmom(pdf[:,:,is], vpa, vperp, upar[is], mass[is])
+        # compute necessary moments of delta_pdf
+        @views delta_n[is] = get_density(delta_pdf[:,:,is], vpa, vperp)
+        @views delta_P[is] = mass[is]*get_upar(delta_pdf[:,:,is], vpa, vperp, 1.0)
+        @views delta_E[is] = 0.5*get_pressure(delta_pdf[:,:,is], vpa, vperp, 0.0, mass[is])
+    end
 
+    b0, b1 = 0.0, 0.0
+    A00, A01, A10, A11 =  0.0, 0.0, 0.0, 0.0
+    for is in 1:species.n
+        b0 += delta_P[is] - mass[is]*upar[is]*delta_n[is]
+        b1 += 2.0*delta_E[is] - delta_n[is]*(mass[is]*upar[is]^2 + 3.0*pressure[is]/density[is])
+        A00 += ppar[is]
+        A01 += 2.0*qpar[is]
+        A10 += 2.0*(qpar[is] + ppar[is]*upar[is])
+        A11 += rmom[is] + 4.0*upar[is]*qpar[is] - 9.0*(pressure[is]^2)/(mass[is]*density[is])
+    end
+
+    # obtain the coefficients for the corrections
+    (x0, x1) = matrix_inverse(A00,A01,A10,A11,b0,b1)
+
+    # correct CC
+    @inbounds begin
+        for is in 1:species.n
+            x0 = (delta_n[is] - 3.0*(pressure[is]/mass[is]))/density[is]
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    wpar = vpa.grid[ivpa] - upar[is]
+                    pdf[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf[ivpa,ivperp,is]
+                end
+            end
+        end
+    end
+end
 """
 Function that applies a numerical-error correcting term to ensure
 numerical conservation of the `density` in the collision operator.
