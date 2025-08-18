@@ -637,7 +637,8 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         if use_conserving_corrections
             # ad-hoc end-of-step corrections, again introducing only ~atol error
             # compute deltaF = F* - F^n, where F* is the Fnew from the uncorrected FP solve
-            deltaF = fkpl_arrays.rhsvpavperp
+            # use Fsw as a dummy array (vpa,vperp,species) as this is now free after leaving newton_solve!
+            deltaF = fkpl_arrays.Fsw
             @inbounds begin
                 for is in 1:species.n
                     @views enforce_vpavperp_BCs!(Fnew[:,:,is],vpa,vperp)
@@ -654,7 +655,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
             # this introduces errors of the size of the distance between F^n+1 and the
             # "correct" root that should have been found by the iterative solve, i.e.,
             # errors of size ~ atol.
-            conserving_corrections!(Fnew, deltaF, vpa, vperp)
+            conserving_corrections!(Fnew, deltaF, fkpl_arrays)
         end
     end
     return success

@@ -29,6 +29,7 @@ export allocate_rosenbluth_potential_boundary_data
 export calculate_rosenbluth_potential_boundary_data_exact!
 export test_rosenbluth_potential_boundary_data
 export interpolate_2D_vspace!
+export matrix_inverse
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
@@ -3750,12 +3751,12 @@ function conserving_corrections!(pdf::AbstractArray{mk_float,3},
     end
 
     # obtain the coefficients for the corrections
-    (x0, x1) = matrix_inverse(A00,A01,A10,A11,b0,b1)
+    (x1, x2) = matrix_inverse(A00,A01,A10,A11,b0,b1)
 
     # correct CC
     @inbounds begin
         for is in 1:species.n
-            x0 = (delta_n[is] - 3.0*(pressure[is]/mass[is]))/density[is]
+            x0 = (delta_n[is]/density[is]) - 3.0*(pressure[is]/(mass[is]*density[is]))*x2
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
                     wpar = vpa.grid[ivpa] - upar[is]
