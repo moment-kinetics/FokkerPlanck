@@ -276,6 +276,10 @@ function fokker_planck_collision_operator_weak_form!(
         # invert mass matrix and fill fc
         ldiv!(sc, lu_obj_MM, rhsc)
     end
+    if use_conserving_corrections
+        # apply multi-species conserving terms
+        conserving_corrections!(CCs, ff_in, nuref, fkpl_arrays)
+    end
     return nothing
 end
 
@@ -628,33 +632,18 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         success = newton_solve!(Fnew, residual_func!,
                         Fresidual, F_delta_x, F_rhs_delta, Fv, Fw, nl_solver_params;
                         right_preconditioner=right_preconditioner)
-        # # apply BCs on result, if non-natural BCs are imposed
-        # # should only introduce error of order ~ atol
-        # enforce_vpavperp_BCs!(Fnew,vpa,vperp)
-        # if use_conserving_corrections
-        #     # ad-hoc end-of-step corrections, again introducing only ~atol error
-        #     deltaF = fkpl_arrays.rhsvpavperp
-        #     @inbounds begin
-        #         for ivperp in 1:vperp.n
-        #             for ivpa in 1:vpa.n
-        #                 deltaF[ivpa,ivperp] = Fnew[ivpa,ivperp] - Fold[ivpa,ivperp]
-        #             end
-        #         end
-        #     end
-        #     # correct deltaF = F^n+1 - F^n so it has no change in moments n, u, p
-        #     # this introduces errors of the size of the distance between F^n+1 and the
-        #     # "correct" root that should have been found by the iterative solve, i.e.,
-        #     # errors of size ~ atol.
-        #     conserving_corrections!(deltaF, Fold, vpa, vperp)
-        #     # update Fnew
-        #     @inbounds begin
-        #         for ivperp in 1:vperp.n
-        #             for ivpa in 1:vpa.n
-        #                 Fnew[ivpa,ivperp] = deltaF[ivpa,ivperp] + Fold[ivpa,ivperp]
-        #             end
-        #         end
-        #     end
-        # end
+        # apply BCs on result, if non-natural BCs are imposed
+        # should only introduce error of order ~ atol
+        if use_conserving_corrections
+            # ad-hoc end-of-step corrections, again introducing only ~atol error
+            # correct Fnew = F^n+1 - F^n so it has no change in moments n,
+            # and no change in the total momentum P = sum_s m_s n_s u_s, and total
+            # energy E =  sum_s (3/2) p_s + (1/2) m_s n_s u_s^2
+            # this introduces errors of the size of the distance between F^n+1 and the
+            # "correct" root that should have been found by the iterative solve, i.e.,
+            # errors of size ~ atol.
+            conserving_corrections!(Fnew, Fold, fkpl_arrays)
+        end
     end
     return success
 end

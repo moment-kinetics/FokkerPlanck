@@ -13,7 +13,7 @@ function test_multispecies_implicit_collisions(;
     # initial pdf info
     vth0=[0.5,0.5]::Vector{mk_float}, vperp0=[1.0,1.0]::Vector{mk_float}, vpa0=[0.0,0.0]::Vector{mk_float}, zbeam=[0.0,0.0]::Vector{mk_float},
     # species info
-    mass=[1.0,1.0]::Vector{mk_float}, zeds=[1.0,1.0]::Vector{mk_float},
+    mass=[1.0,1.0]::Vector{mk_float}, zeds=[1.0,1.0]::Vector{mk_float}, density_in=[1.0,1.0]::Vector{mk_float},
     # grid info
     ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
     Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
@@ -42,7 +42,7 @@ function test_multispecies_implicit_collisions(;
     # check inputs are consistent
     @boundscheck (nspecies == length(mass) && nspecies == length(vth0) 
                    && nspecies == length(vperp0) && nspecies == length(vpa0)
-                   && nspecies == length(zbeam)) || throw(BoundsError(zeds))
+                   && nspecies == length(zbeam) && nspecies == length(density_in)) || throw(BoundsError(zeds))
 
     start_init_time = now()
     # group integer inputs using `scalar_coordinate_inputs` from FokkerPlanck.coordinates
@@ -92,12 +92,14 @@ function test_multispecies_implicit_collisions(;
     time = 0.0
     for is in 1:species.n
         @views set_initial_pdf!(Fold[:,:,is],vpa,vperp,vpa0[is],vperp0[is],vth0[is],zbeam[is])
+        # multiply by initial density
+        @views Fold[:,:,is] *= density_in[is]
     end
     # store initial pdf for output
     Fout[:,:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
-    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays)
-                #, use_conserving_corrections=test_numerical_conserving_terms)
+    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays,
+             use_conserving_corrections=test_numerical_conserving_terms)
     # print diagnostic info to screen
     if print_diagnostics
         diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,0)
