@@ -35,7 +35,7 @@ using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..calculus: integral
 using ..coordinates: first_derivative!, finite_element_coordinate,
-                    finite_element_boundary_condition_type, zero_boundary_condition
+                    finite_element_boundary_condition_type, zero_boundary_condition, natural_boundary_condition
 using ..velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using ..fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
@@ -3904,7 +3904,16 @@ function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
     vpa::finite_element_coordinate,
     vperp::finite_element_coordinate,
     YY_arrays::YY_collision_operator_arrays) where Tpdf <: AbstractArray{mk_float,2}
-
+    if vpa.ngrid < 5 || vperp.ngrid < 5
+        msg = """ERROR: integrate_collision_moments() is inconsistent with integration weights for vpa.ngrid < 5 or vperp.ngrid < 5
+        """
+        error(msg)
+    end
+    if vpa.bc != natural_boundary_condition || vperp.bc != natural_boundary_condition
+        msg = """ERROR: integrate_collision_moments() is only consistent with boundary conditions for vpa.bc=natural_boundary_condition and vperp.bc=natural_boundary_condition
+        """
+        error(msg)
+    end
     int_C = 0.0 # by construction
     int_vpa_C = 0.0
     int_vpa2_C = 0.0
