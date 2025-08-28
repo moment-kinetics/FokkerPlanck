@@ -132,7 +132,7 @@ function test_implicit_collisions(;
         # print_grid(vpa)
         # print_grid(vperp)
         # print_pdf(Fout)
-        return pdf_and_grid(vpa.grid,vperp.grid,Fout)
+        return pdf_and_grid{3}(vpa.grid,vperp.grid,Fout)
     else
         return nothing
     end

@@ -307,9 +307,37 @@ function print_pdf(pdf::AbstractArray{mk_float,3})
     print("]\n")
     return nothing
 end
+function print_pdf(pdf::AbstractArray{mk_float,4})
+    println("# Expected Fout")
+    print("[")
+    nvpa, nvperp, nspecies, ntind = size(pdf)
+    for l in 1:ntind
+        for k in 1:nspecies
+            for i in 1:nvpa-1
+                for j in 1:nvperp-1
+                    @printf("%.15f ", pdf[i,j,k,l])
+                end
+                @printf("%.15f ", pdf[i,nvperp,k,l])
+                print(";\n")
+            end
+            for j in 1:nvperp-1
+                @printf("%.15f ", pdf[nvpa,j,k,l])
+            end
+            @printf("%.15f ", pdf[nvpa,nvperp,k,l])
+            if k < nspecies
+                print(";;;\n")
+            end
+        end
+        if l < ntind
+            print(";;;;\n")
+        end
+    end
+    print("]\n")
+    return nothing
+end
 
-struct pdf_and_grid
+struct pdf_and_grid{N}
     vpa_grid::Vector{mk_float}
     vperp_grid::Vector{mk_float}
-    pdf::AbstractArray{mk_float,3}
+    pdf::AbstractArray{mk_float,N}
 end
