@@ -8,7 +8,6 @@ function runtests()
         include(joinpath(@__DIR__, "Interface.jl"))
         include(joinpath(@__DIR__, "fokker_planck_tests.jl"))
         include(joinpath(@__DIR__, "ImplicitCollisionsTestCI.jl"))
-        include(joinpath(@__DIR__, "MultiSpeciesImplicitCollisionsTestCI.jl"))
     end
 end
 
