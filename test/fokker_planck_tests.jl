@@ -775,15 +775,17 @@ function runtests()
                     denss, upars, vths = 1.0, -1.0, 2.0/3.0
                     dens, upar, vth = 1.0, 1.0, 1.0
                 end
-                ms = 1.0
+                ms = species.mass[1]
+                Zs = species.zeds[1]
                 msp = 1.0
+                Zsp = 1.0
                 nussp = 1.0
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
                         Fs_M[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
                         F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,
-                                                                        dens,upar,vth,msp,
+                        C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,Zs,
+                                                                        dens,upar,vth,msp,Zsp,
                                                                         nussp,vpa,vperp,ivpa,ivperp)
                     end
                 end
@@ -914,15 +916,15 @@ function runtests()
                 # enough to 1 for errors comparable to the self-collision operator
                 # increasing or reducing vth, mass increases the errors
                 dens, upar, vth = 1.0, 1.0, 1.0
-                mref = 1.0
-                Zref = 1.0
+                mref = 1.0 # mass of reference species, here the evolved species
+                Zref = 2.0 # Z of reference species
                 msp = [1.0,0.2]#[0.25, 0.25/1836.0]
-                Zsp = [0.5,0.5]#[0.5, 0.5]
+                Zsp = [1.0,1.0]#[0.5, 0.5]
                 denssp = [1.0,1.0]#[1.0, 1.0]
                 uparsp = [0.0,0.0]#[0.0, 0.0]
                 vthsp = [sqrt(0.5/msp[1]), sqrt(0.5/msp[2])]#[sqrt(0.01/msp[1]), sqrt(0.01/msp[2])]
                 nsprime = size(msp,1)
-                nuref = 1.0
+                nuref = 1.0/16.0
 
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
@@ -932,12 +934,11 @@ function runtests()
                 end
                 # sum up contributions to cross-collision operator
                 for isp in 1:nsprime
-                    zfac = (Zsp[isp]/Zref)^2
-                    nussp = nuref*zfac
+                    nussp = nuref
                     for ivperp in 1:vperp.n
                         for ivpa in 1:vpa.n
-                            C_M_exact[ivpa,ivperp] += Cssp_Maxwellian_inputs(dens,upar,vth,mref,
-                                                                            denssp[isp],uparsp[isp],vthsp[isp],msp[isp],
+                            C_M_exact[ivpa,ivperp] += Cssp_Maxwellian_inputs(dens,upar,vth,mref,Zref,
+                                                                            denssp[isp],uparsp[isp],vthsp[isp],msp[isp],Zsp[isp],
                                                                             nussp,vpa,vperp,ivpa,ivperp)
                         end
                     end

@@ -185,8 +185,10 @@ end
             denss, upars, vths = 1.0, -1.0, 2.0/3.0
             dens, upar, vth = 1.0, 1.0, 1.0
         end
-        ms = 1.0
+        ms = species.mass[1]
+        Zs = species.zeds[1]
         msp = 1.0
+        Zsp = 1.0
         nussp = 1.0
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -200,8 +202,8 @@ end
                 d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,
-                                                                dens,upar,vth,msp,
+                C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,Zs,
+                                                                dens,upar,vth,msp,Zsp,
                                                                 nussp,vpa,vperp,ivpa,ivperp)
             end
         end

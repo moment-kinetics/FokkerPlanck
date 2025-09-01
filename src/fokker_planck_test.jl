@@ -330,8 +330,8 @@ end
 Calculates the fully expanded form of the collision operator \$C_{s s^\\prime}[F_s,F_{s^\\prime}]\$ given Maxwellian input \$F_s\$ and \$F_{s^\\prime}\$.
 The input Maxwellians are specified through their moments.
 """
-function Cssp_Maxwellian_inputs(denss::mk_float,upars::mk_float,vths::mk_float,ms::mk_float,
-                                denssp::mk_float,uparsp::mk_float,vthsp::mk_float,msp::mk_float,
+function Cssp_Maxwellian_inputs(denss::mk_float,upars::mk_float,vths::mk_float,ms::mk_float,Zs::mk_float,
+                                denssp::mk_float,uparsp::mk_float,vthsp::mk_float,msp::mk_float,Zsp::mk_float,
                                 nussp::mk_float,vpa::finite_element_coordinate,
                                 vperp::finite_element_coordinate,ivpa::mk_int,ivperp::mk_int)
     
@@ -357,8 +357,9 @@ function Cssp_Maxwellian_inputs(denss::mk_float,upars::mk_float,vths::mk_float,m
         (1.0/(vperp.grid[ivperp]^2))*dFsdvperp*dGspdvperp +
         2.0*(1.0 - (ms/msp))*(dFsdvpa*dHspdvpa + dFsdvperp*dHspdvperp) +
         (8.0*pi)*(ms/msp)*Fs*Fsp)
-        
-    Cssp_Maxwellian *= nussp
+    # gamma_ss' = 2 pi e^4 ln \Lambda_ss' / (4 pi \epsilon_0)^2
+    # nussp = (Lref/cref) (gamma_ss' nref / mref^2 cref^3)
+    Cssp_Maxwellian *= nussp*(Zs*Zsp/ms)^2
     return Cssp_Maxwellian
 end
 
