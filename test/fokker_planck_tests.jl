@@ -993,7 +993,7 @@ function runtests()
             test_Maxwellian_Rosenbluth_coefficients = false
             density = [1.0, 1.0, 1.0]
             upar = [1.0, -0.7, 0.2]
-            vth = [1.0,0.5,1.0]
+            vth = [1.0,1.0,1.0]
             @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds)" for
                     (boundary_data_option, species) in (#(direct_integration,species_info([0.5],[2.0]),),
                                                         (multipole_expansion,species_info([0.5],[2.0]),),
@@ -1016,21 +1016,54 @@ function runtests()
                     mass = species.mass
                     zed = species.zeds
                     @. C_M_exact = 0.0
+                    nfac = 0.3
+                    ufac = 0.7
+                    # specify a pdf that has a nonzero qpar~ 0.1 pressure by summing Maxwellian distributions
+                    # F_s = F_sA + nfac * F_sB
                     for is in 1:species.n
                         for ivperp in 1:vperp.n
                             for ivpa in 1:vpa.n
-                                F_M[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                                F_M[ivpa,ivperp,is] = (F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp) +
+                                                        nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa,vperp,ivpa,ivperp))
                             end
                         end
+                        # use this commented code to assess how far from Maxwellian F_M is
+                        # @views density_M = get_density(F_M[:,:,is], vpa, vperp)
+                        # @views upar_M = get_upar(F_M[:,:,is], vpa, vperp, density_M)
+                        # @views pressure_M = get_pressure(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                        # @views ppar_M = get_ppar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                        # @views qpar_M = get_qpar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                        # @views rmom_M = get_rmom(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                        # println("density_M: $density_M")
+                        # println("upar_M: $upar_M")
+                        # println("pressure_M: $pressure_M")
+                        # println("ppar_M: $ppar_M")
+                        # println("qpar_M: $qpar_M")
+                        # println("rmom_M: $rmom_M")
+                        # println("qpar_M/ppar_M $(qpar_M/ppar_M)")
                     end
                     # sum up contributions to cross-collision operator
                     for is in 1:species.n
                         for isp in 1:species.n
                             for ivperp in 1:vperp.n
                                 for ivpa in 1:vpa.n
-                                    C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                    # obtain an exact expression for the non-Maxwellian pdf
+                                    # by using that the collision operator is bilinear, i.e.,
+                                    # C[F_s,F_s'] =  C[F_sA,F_s'A]
+                                    #                 + nfac * ( C[F_sA,F_s'B] + C[F_sB,F_s'A])
+                                    #                 + nfac^2 * C[F_sB,F_s'B]
+                                    C_M_exact[ivpa,ivperp,is] += (Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
                                                                                     density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
-                                                                                    nuref,vpa,vperp,ivpa,ivperp)
+                                                                                    nuref,vpa,vperp,ivpa,ivperp) +
+                                                                  nfac*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                                    density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                                    nuref,vpa,vperp,ivpa,ivperp) +
+                                                                  nfac*Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                                    density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                                    nuref,vpa,vperp,ivpa,ivperp) +
+                                                                  (nfac^2)*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                                    density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                                    nuref,vpa,vperp,ivpa,ivperp))
                                 end
                             end
                         end
@@ -1045,28 +1078,21 @@ function runtests()
                     # set small absolute values
                     atol_max = 1.0e-5
                     atol_L2 = 1.0e-7
-                    if species.n > 1
-                        # test relative values as C_M_exact /= 0 in general
-                        rtol_max = atol_max
-                        rtol_L2 = atol_L2
-                    else
-                        rtol_max = 0.0
-                        rtol_L2 = 0.0
-                    end
+                    # test relative values as C_M_exact /= 0 in general
+                    rtol_max = atol_max
+                    rtol_L2 = atol_L2
                     for is in 1:species.n
                         Cnorm = maximum(abs.(@view C_M_exact[:,:,is]))
                         @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M[$(is)]",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
                         #println(Cnorm, " ", C_M_max, " ", C_M_L2)
-                        atol_max = 1.0e-5
-                        atol_L2 = 1.0e-7
                         @test C_M_max < atol_max + rtol_max*Cnorm
                         @test C_M_L2 < atol_L2 + rtol_L2*Cnorm
                     end
                     # test conservation properties
                     if test_numerical_conserving_terms
-                        atol_n = 3.0e-12
-                        atol_momentum = 1.0e-12
-                        atol_energy = 1.0e-12
+                        atol_n = 5.0e-12
+                        atol_momentum = 3.0e-12
+                        atol_energy = 3.0e-12
                     else
                         atol_n = 1.0e-11
                         atol_momentum = 1.0e-8
@@ -1090,6 +1116,10 @@ function runtests()
                         @views delta_energy += get_pressure(C_M_num[:,:,is],vpa,vperp,0.0,mass[is])
                     end
                     @test delta_energy < atol_energy
+                    # check entropy production is positive for pdf far from Maxwellian
+                    # n.b. dSdt may be negative and small if pdf is close to Maxwellian
+                    dSdt = calculate_entropy_production(F_M,fkpl_arrays)
+                    @test dSdt > 0.0
                 end
             end
         end
