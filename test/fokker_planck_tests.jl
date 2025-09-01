@@ -979,6 +979,86 @@ function runtests()
             
         end
 
+        @testset "weak-form (multi-species) collision operator calculation" begin
+            println("    - test weak-form (multi-species) collision operator calculation")
+            ngrid = 17
+            nelement_vpa = 8
+            nelement_vperp = 4
+            vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                    Lvpa=10.0,Lvperp=5.0)
+            nuref = 1.0
+            test_numerical_conserving_terms = false
+            test_Maxwellian_Rosenbluth_coefficients = false
+            density = [1.0, 1.0, 1.0]
+            upar = [1.0, -0.7, 0.2]
+            vth = [1.0,0.5,1.0]
+            @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds)" for
+                    (boundary_data_option, species) in (#(direct_integration,species_info([0.5],[2.0]),),
+                                                        (multipole_expansion,species_info([0.5],[2.0]),),
+                                                        (delta_f_multipole,species_info([0.5],[2.0]),),
+                                                        (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),),
+                                                        (delta_f_multipole,species_info([0.5,1.0,2.0],[2.0,-1.0,1.0]),),
+                                                        )
+                println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds)")
+                fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                                                print_to_screen=print_to_screen)
+                # arrays for the test
+                F_M = allocate_float(vpa.n,vperp.n,species.n)
+                C_M_num = allocate_float(vpa.n,vperp.n,species.n)
+                C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
+                C_M_err = allocate_float(vpa.n,vperp.n)
+                dummy_array = allocate_float(vpa.n,vperp.n)
+                mass = species.mass
+                zed = species.zeds
+                @. C_M_exact = 0.0
+                for is in 1:species.n
+                    for ivperp in 1:vperp.n
+                        for ivpa in 1:vpa.n
+                            F_M[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                        end
+                    end
+                end
+                # sum up contributions to cross-collision operator
+                for is in 1:species.n
+                    for isp in 1:species.n
+                        for ivperp in 1:vperp.n
+                            for ivpa in 1:vpa.n
+                                C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                                density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                                nuref,vpa,vperp,ivpa,ivperp)
+                            end
+                        end
+                    end
+                end
+                fokker_planck_collision_operator_weak_form!(
+                         F_M, nuref, fkpl_arrays;
+                         use_conserving_corrections=test_numerical_conserving_terms,
+                         use_Maxwellian_Rosenbluth_coefficients=test_Maxwellian_Rosenbluth_coefficients)
+                # extract result
+                @. C_M_num = fkpl_arrays.CCs
+
+                # set small absolute values
+                atol_max = 1.0e-5
+                atol_L2 = 1.0e-7
+                if species.n > 1
+                    # test relative values as C_M_exact /= 0 in general
+                    rtol_max = atol_max
+                    rtol_L2 = atol_L2
+                else
+                    rtol_max = 0.0
+                    rtol_L2 = 0.0
+                end
+                for is in 1:species.n
+                    Cnorm = maximum(abs.(@view C_M_exact[:,:,is]))
+                    @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M[$(is)]",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+                    #println(Cnorm, " ", C_M_max, " ", C_M_L2)
+                    atol_max = 1.0e-5
+                    atol_L2 = 1.0e-7
+                    @test C_M_max < atol_max + rtol_max*Cnorm
+                    @test C_M_L2 < atol_L2 + rtol_L2*Cnorm
+                end
+            end
+        end
         @testset "weak-form Rosenbluth potential calculation: direct integration" begin
             println("    - test weak-form Rosenbluth potential calculation: direct integration")
             ngrid = 5 # chosen for a quick test -- direct integration is slow!
