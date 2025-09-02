@@ -400,6 +400,119 @@ function numerical_error_corrections_test(;
     return nothing
 end
 
+function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
+    vpa::finite_element_coordinate,
+    vperp::finite_element_coordinate,
+    species::species_info)
+    parallel_momentum = 0.0
+    for is in 1:species.n
+        @views gamma = get_upar(ff[:,:,is],vpa,vperp,1.0)
+        parallel_momentum += species.mass[is]*gamma
+    end
+    return parallel_momentum
+end
+
+function get_total_energy(ff::AbstractArray{mk_float,3},
+    vpa::finite_element_coordinate,
+    vperp::finite_element_coordinate,
+    species::species_info)
+    energy = 0.0
+    for is in 1:species.n
+        @views energy += get_pressure(ff[:,:,is],vpa,vperp,0.0,species.mass[is])
+    end
+    return energy
+end
+
+function multi_species_numerical_error_corrections_test(;
+    ngrid = 5,
+    nelement_vpa = 8,
+    nelement_vperp = 4,
+    Lvpa = 12.0,
+    Lvperp = 6.0,
+    abeam = 0.5,
+    vpa0 = 1.0,
+    vperp0 = 1.0,
+    vth0 = 0.5,
+    atol = 5.0e-14,
+    print_to_screen=false,
+    )
+    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                                                Lvpa=Lvpa,Lvperp=Lvperp)
+    boundary_data_option = multipole_expansion
+    species = species_info([1.0,2.0],[1.0,2.0])
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                        print_to_screen=print_to_screen)
+
+    pdf_new = allocate_float(vpa.n,vperp.n,species.n)
+    pdf_old = allocate_float(vpa.n,vperp.n,species.n)
+    # initialise a distribution that has a qpar
+    for is in 1:species.n
+        for ivperp in 1:vperp.n
+            for ivpa in 1:vpa.n
+                pdf_new[ivpa,ivperp,is] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                                            + F_Beam(0.0,vperp0,vth0,vpa,vperp,ivpa,ivperp))
+            end
+        end
+    end
+    for is in 1:species.n
+        mass = species.mass
+        @views density = get_density(pdf_new[:,:,is], vpa, vperp)
+        @views upar = get_upar(pdf_new[:,:,is], vpa, vperp, density)
+        @views pressure = get_pressure(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        @views ppar = get_ppar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        @views qpar = get_qpar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        @views rmom = get_rmom(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        # println("density: $density")
+        # println("upar: $upar")
+        # println("pressure: $pressure")
+        # println("ppar: $ppar")
+        # println("qpar: $qpar")
+        # println("rmom: $rmom")
+        # println("qpar/ppar $(qpar/ppar)")
+        # check test pdf unchanged, and has nonzero qpar
+        if abeam == 0.5 && vpa0 == 1.0 && vperp0 == 1.0 && vth0 == 0.5
+            @test isapprox(density, 7.416900452984803, atol=atol)
+            @test isapprox(upar, 0.33114644602432997, atol=atol)
+            @test isapprox(pressure, mass[is]*4.242094519010763, atol=atol)
+            @test isapprox(ppar, mass[is]*2.5479896423369506, atol=atol)
+            @test isapprox(qpar, mass[is]*0.29147880412034594, atol=atol)
+            @test isapprox(rmom, mass[is]*27.57985752143237, atol=6*atol)
+        end
+    end
+
+
+    densitys, upars, vths = [1.1, 0.9], [1.0, 0.75], [1.0, 1.0]
+    @inbounds begin
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    pdf_old[ivpa,ivperp,is] = F_Maxwellian(densitys[is],upars[is],vths[is],vpa,vperp,ivpa,ivperp)
+                end
+            end
+        end
+    end
+
+    # make ad-hoc conserving corrections to make the density, total momentum and total energy
+    # of pdf_new equal to those in pdf_old
+    conserving_corrections!(pdf_new,pdf_old,fkpl_arrays)
+
+    # check pdf_new and pdf_old now have the same density, total momentum and total energy moments
+    for is in 1:species.n
+        @views n_new = get_density(pdf_new[:,:,is], vpa, vperp)
+        @views n_old = get_density(pdf_old[:,:,is], vpa, vperp)
+        @test abs(n_new-n_old) < atol
+    end
+    # compute total parallel momentum
+    parallel_momentum_new = get_total_parallel_momentum(pdf_new,vpa,vperp,species)
+    parallel_momentum_old = get_total_parallel_momentum(pdf_old,vpa,vperp,species)
+    @test abs(parallel_momentum_new - parallel_momentum_old) < atol
+    # compute total energy
+    energy_new = get_total_energy(pdf_new,vpa,vperp,species)
+    energy_old = get_total_energy(pdf_old,vpa,vperp,species)
+    @test abs(energy_new - energy_old) < atol
+    return nothing
+end
+
 function test_interpolate_2D_vspace(; ngrid=9,
                                 nelement_vpa=16,
                                 nelement_vperp = 8,
@@ -597,17 +710,10 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
                 @test delta_n < atol_n
             end
             # compute change in total parallel momentum
-            delta_parallel_momentum = 0.0
-            for is in 1:species.n
-                @views delta_gamma = get_upar(C_M_num[:,:,is],vpa,vperp,1.0)
-                delta_parallel_momentum += mass[is]*delta_gamma
-            end
+            delta_parallel_momentum = get_total_parallel_momentum(C_M_num,vpa,vperp,species)
             @test delta_parallel_momentum < atol_momentum
             # compute change in total energy
-            delta_energy = 0.0
-            for is in 1:species.n
-                @views delta_energy += get_pressure(C_M_num[:,:,is],vpa,vperp,0.0,mass[is])
-            end
+            delta_energy = get_total_energy(C_M_num,vpa,vperp,species)
             @test delta_energy < atol_energy
             # check entropy production is positive for pdf far from Maxwellian
             # n.b. dSdt may be negative and small if pdf is close to Maxwellian
@@ -1248,6 +1354,7 @@ function runtests()
         @testset "numerical error correcting terms" begin
             println("    - test numerical error correcting terms")
             numerical_error_corrections_test(print_to_screen=print_to_screen)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen)
         end
 
 
