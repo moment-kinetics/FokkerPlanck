@@ -466,7 +466,7 @@ struct species_info
         # number of species
         nspecies = length(zeds)
         # check inputs are consistent
-        @boundscheck nspecies == length(mass)
+        @boundscheck nspecies == length(mass) || throw(BoundsError(mass))
         # check mass positive and > 0
         for is in 1:nspecies
             if mass[is] < 1.0e-12
