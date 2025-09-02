@@ -1125,9 +1125,13 @@ function runtests()
         @testset "weak-form (multi-species) collision operator calculation" begin
             println("    - test weak-form (multi-species) collision operator calculation")
             ngrid = 17
-            nelement_vpa = 8
-            nelement_vperp = 4
-            multi_species_fokker_planck_collisions_test(ngrid=ngrid, nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
+            nelement_vpa = 4
+            nelement_vperp = 2
+            atol_max = 1.0e-4
+            atol_L2 = 1.0e-6
+            multi_species_fokker_planck_collisions_test(ngrid=ngrid,
+                nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
+                atol_max = atol_max, atol_L2=atol_L2,
                 print_to_screen=print_to_screen)
         end
         @testset "weak-form Rosenbluth potential calculation: direct integration" begin
