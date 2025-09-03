@@ -3646,51 +3646,6 @@ function conserving_corrections!(CC::AbstractArray{mk_float,2},
         end
     end
 end
-function conserving_corrections!(CC::AbstractArray{mk_float,2},
-                            pdf_in::AbstractArray{mk_float,2},
-                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = get_collision_moments(pdf_in, 1.0, 1.0, 1.0, fkpl_arrays)
-
-    # compute moments of the input pdf
-    dens = get_density(pdf_in, vpa, vperp)
-    upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar)
-    vth = sqrt(2.0*pressure/dens)
-    ppar = get_ppar(pdf_in, vpa, vperp, upar)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar)
-
-    # compute moments of the numerical collision operator
-    dn = get_density(CC, vpa, vperp)
-    du = get_upar(CC, vpa, vperp, 1.0)
-    dp = get_pressure(CC, vpa, vperp, upar)
-
-    println("dn: ", dn)
-    println("int_vpa_C: ", int_vpa_C, " du: ", du)
-    println("int_vpa_C - du: ", int_vpa_C - du)
-    int_w2_C = int_vpa2_C + int_vperp2_C - 2.0*upar*int_vpa_C
-    println("(1/3)*int_w2_C: ", (1.0/3.0)*int_w2_C, " dp: ", dp)
-    println("(1/3)*int_w2_C - dp: ", (1.0/3.0)*int_w2_C -  dp)
-
-    # form the appropriate matrix coefficients
-    b0, b1, b2 = dn, du - upar*dn, 3.0*dp
-    A00, A02, A11, A12, A22 = dens, 3.0*pressure, ppar, 2.0*qpar, rmom
-
-    # obtain the coefficients for the corrections
-    (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
-
-    # correct CC
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                wpar = vpa.grid[ivpa] - upar
-                CC[ivpa,ivperp] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp]
-            end
-        end
-    end
-end
 function conserving_corrections!(CC::AbstractArray{mk_float,3},
                             pdf_in::AbstractArray{mk_float,3}, nuref::mk_float,
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
@@ -3879,23 +3834,6 @@ end
 ##
 # element-wise integration function to get moments of C(vpa,vperp) without assembling C
 ##
-function get_collision_moments(pdf_in::AbstractArray{mk_float,2},
-    ms::mk_float, msp::mk_float, nussp::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    # call the lower level function after expanding some variables
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    YY_arrays = fkpl_arrays.YY_arrays
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dHdvpa = fkpl_arrays.dHdvpa
-    int_C_vec = integrate_collision_moments(pdf_in,d2Gdvpa2,d2Gdvperpdvpa,
-        d2Gdvperp2,dHdvpa,dHdvperp,ms,msp,nussp,
-        vpa,vperp,YY_arrays)
-    return int_C_vec
-end
 function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     nuref::mk_float,fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     # call the lower level function after expanding some variables
