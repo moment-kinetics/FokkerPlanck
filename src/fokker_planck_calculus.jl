@@ -521,8 +521,6 @@ struct fokkerplanck_weakform_arrays_struct
     S_dummy::Array{mk_float,2}
     Q_dummy::Array{mk_float,2}
     rhsvpavperp::Array{mk_float,2}
-    # dummy array for the result of the calculation (multi species)
-    # CCs::Array{mk_float,3}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
     GGs::Array{mk_float,3}
     HHs::Array{mk_float,3}
@@ -532,8 +530,6 @@ struct fokkerplanck_weakform_arrays_struct
     d2Gsdvperp2::Array{mk_float,3}
     d2Gsdvpa2::Array{mk_float,3}
     d2Gsdvperpdvpa::Array{mk_float,3}
-    # dummy array for the result of the calculation
-    # CC::Array{mk_float,2}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
     GG::Array{mk_float,2}
     HH::Array{mk_float,2}
@@ -543,9 +539,6 @@ struct fokkerplanck_weakform_arrays_struct
     d2Gdvperp2::Array{mk_float,2}
     d2Gdvpa2::Array{mk_float,2}
     d2Gdvperpdvpa::Array{mk_float,2}
-    FF::Array{mk_float,2}
-    dFdvpa::Array{mk_float,2}
-    dFdvperp::Array{mk_float,2}
     # collision operator moment arrays
     delta_n_sp_s::Array{mk_float,2}
     delta_m_sp_s::Array{mk_float,2}
@@ -620,9 +613,6 @@ struct fokkerplanck_weakform_arrays_struct
         d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
         d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
 
-        FF = allocate_float(nvpa,nvperp)
-        dFdvpa = allocate_float(nvpa,nvperp)
-        dFdvperp = allocate_float(nvpa,nvperp)
         # preconditioner matrix
         CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
         lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
@@ -655,7 +645,6 @@ struct fokkerplanck_weakform_arrays_struct
                     GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
                     #CC,
                     GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
-                    FF, dFdvpa, dFdvperp,
                     # CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
                     # nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
                     # nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,

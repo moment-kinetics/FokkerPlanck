@@ -298,9 +298,6 @@ function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(CC::Abstract
     d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
     d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
     d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-    FF = fkpl_arrays.FF
-    dFdvpa = fkpl_arrays.dFdvpa
-    dFdvperp = fkpl_arrays.dFdvperp
 
     # number of primed species
     nsp = size(msp,1)
