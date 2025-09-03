@@ -51,12 +51,11 @@ function calculate_total_energy(moments::moments_struct,species::species_info)
     end
     return total_energy
 end
-function calculate_total_change(fkpl_arrays)
+function calculate_total_change(CCs,fkpl_arrays)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     mass = species.mass
-    CCs = fkpl_arrays.CCs
     total_momentum_change = 0.0
     total_energy_change = 0.0
     for is in 1:species.n
@@ -66,7 +65,8 @@ function calculate_total_change(fkpl_arrays)
     return total_momentum_change, total_energy_change
 end
 
-function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
+function get_moments(pdf::AbstractArray{mk_float,2},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct,mass::mk_float)
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -80,7 +80,7 @@ function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     return dens, upar, vth, pressure, ppar, qpar, rmom
 end
 
-function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
+function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,2},pdf::AbstractArray{mk_float,2},
                     pdf_exact::AbstractArray{mk_float,2},
                     pdf_dummy_1::AbstractArray{mk_float,2},
                     pdf_dummy_2::AbstractArray{mk_float,2},
@@ -107,7 +107,7 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
     println("ppar: ", ppar)
     println("qpar: ", qpar)
     println("rmom: ", rmom)
-    dSdt = calculate_entropy_production(pdf,fkpl_arrays)
+    dSdt = calculate_entropy_production(CC,pdf,fkpl_arrays)
     println("dSdt: ", dSdt)
     if vpa.bc == zero_boundary_condition
         println("test vpa bc: F[1, :]", pdf[1, :])
@@ -117,7 +117,8 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
         println("test vperp bc: F[:, end]", pdf[:, end])
     end
 end
-function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
+function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
+                    pdf::AbstractArray{mk_float,3},
                     pdf_exact::AbstractArray{mk_float,3},
                     pdf_dummy_1::AbstractArray{mk_float,2},
                     pdf_dummy_2::AbstractArray{mk_float,2},
@@ -159,8 +160,8 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     # println("rmom: ", moments.rmom)
     total_parallel_momentum = calculate_total_parallel_momentum(moments,species)
     total_energy = calculate_total_energy(moments,species)
-    dSdt = calculate_entropy_production(pdf,fkpl_arrays)
-    delta_momentum_C, delta_energy_C = calculate_total_change(fkpl_arrays)
+    dSdt = calculate_entropy_production(CC,pdf,fkpl_arrays)
+    delta_momentum_C, delta_energy_C = calculate_total_change(CC,fkpl_arrays)
     if it == 0
         # store conserved quantities
         moments.conserved[1:species.n] .= moments.density

@@ -14,7 +14,7 @@ using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole
 
-using FokkerPlanck: init_fokker_planck_collisions, fokker_planck_collision_operator_weak_form!
+using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info
 using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 using FokkerPlanck: fokker_planck_self_collisions_backward_euler_step!, calculate_entropy_production
@@ -91,8 +91,8 @@ function backward_Euler_linearised_collisions_test(;
                                                                 Lvpa=10.0,Lvperp=5.0,
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
     species = species_info([ms],[1.0])
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
-                        print_to_screen=print_to_screen)
+    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+                        0.0, 0.0, 0, print_to_screen)
     dummy_array = allocate_float(vpa.n,vperp.n)
     FMaxwell = allocate_float(vpa.n,vperp.n)
     FMaxwell_err = allocate_float(vpa.n,vperp.n)
@@ -227,10 +227,12 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc_vpa,bc_vperp=bc_vperp)
     species = species_info([1.0],[1.0])
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option;
-                        nl_solver_atol=1.0e-10,
-                        nl_solver_rtol=0.0,
-                        print_to_screen=print_to_screen)
+    nl_solver_atol=1.0e-10
+    nl_solver_rtol=0.0
+    nl_solver_nonlinear_max_iterations=20
+    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+                        nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
+                        print_to_screen)
 
     # initial condition
     Fold = allocate_float(vpa.n,vperp.n)
@@ -369,26 +371,16 @@ function numerical_error_corrections_test(;
         @test isapprox(rmom, mass*27.57985752143237, atol=6*atol)
     end
 
-    CC = fkpl_arrays.CC
-    # fill CC with a pdf that definitely has a density, mean flow, and pressure (unlike C[F,F])
+    # fill C_num with a pdf that definitely has a density, mean flow, and pressure (unlike C[F,F])
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                CC[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
+                C_num[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
             end
         end
     end
     # make ad-hoc conserving corrections to remove the denisty, mean flow, and pressure
-    conserving_corrections!(CC,pdf_in,vpa,vperp,mass)
-
-    # extract result
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                C_num[ivpa,ivperp] = CC[ivpa,ivperp]
-            end
-        end
-    end
+    conserving_corrections!(C_num,pdf_in,vpa,vperp,mass)
 
     # check CC now has zero density, flow, and pressure moments
     dn = get_density(C_num, vpa, vperp)
@@ -677,13 +669,10 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
                     end
                 end
             end
-            fokker_planck_collision_operator_weak_form!(
+            fokker_planck_collision_operator_weak_form!(C_M_num,
                     F_M, nuref, fkpl_arrays;
                     use_conserving_corrections=test_numerical_conserving_terms,
                     use_Maxwellian_Rosenbluth_coefficients=test_Maxwellian_Rosenbluth_coefficients)
-            # extract result
-            @. C_M_num = fkpl_arrays.CCs
-
             # test relative values as C_M_exact /= 0 in general
             rtol_max = atol_max
             rtol_L2 = atol_L2
@@ -717,7 +706,7 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
             @test delta_energy < atol_energy
             # check entropy production is positive for pdf far from Maxwellian
             # n.b. dSdt may be negative and small if pdf is close to Maxwellian
-            dSdt = calculate_entropy_production(F_M,fkpl_arrays)
+            dSdt = calculate_entropy_production(C_M_num,F_M,fkpl_arrays)
             @test dSdt > 0.0
         end
     end
@@ -1038,23 +1027,15 @@ function runtests()
                                                                         nussp,vpa,vperp,ivpa,ivperp)
                     end
                 end
-                fokker_planck_collision_operator_weak_form!(Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
+                fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
                                                  use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients,
                                                  algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                                                  calculate_GG = false, calculate_dGdvperp=false)
                 if test_numerical_conserving_terms && test_self_operator
                     # enforce the boundary conditions on CC before it is used for timestepping
-                    enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
+                    enforce_vpavperp_BCs!(C_M_num,vpa,vperp)
                     # make ad-hoc conserving corrections
-                    conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp,ms)
-                end
-                # extract C[Fs,Fs'] result
-                @inbounds begin
-                    for ivperp in 1:vperp.n
-                        for ivpa in 1:vpa.n
-                            C_M_num[ivpa,ivperp] = fkpl_arrays.CC[ivpa,ivperp]
-                        end
-                    end
+                    conserving_corrections!(C_M_num,Fs_M,vpa,vperp,ms)
                 end
                 C_M_max, C_M_L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
                 if test_self_operator && !test_numerical_conserving_terms && !use_Maxwellian_Rosenbluth_coefficients
@@ -1074,7 +1055,7 @@ function runtests()
                 @test C_M_L2 < atol_L2
 
                 # calculate the entropy production
-                dSdt = calculate_entropy_production(Fs_M,fkpl_arrays)
+                dSdt = calculate_entropy_production(C_M_num,Fs_M,fkpl_arrays)
 
                 if test_self_operator && !test_numerical_conserving_terms
                     if algebraic_solve_for_d2Gdvperp2
@@ -1192,18 +1173,10 @@ function runtests()
                         end
                     end
                 end
-                fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(Fs_M,
+                fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(C_M_num,Fs_M,
                                      nuref,mref,Zref,msp,Zsp,denssp,uparsp,vthsp,
                                      fkpl_arrays;
                                      use_conserving_corrections=test_numerical_conserving_terms)
-                # extract C[Fs,Fs'] result
-                @inbounds begin
-                    for ivperp in 1:vperp.n
-                        for ivpa in 1:vpa.n
-                            C_M_num[ivpa,ivperp] = fkpl_arrays.CC[ivpa,ivperp]
-                        end
-                    end
-                end
                 C_M_max, C_M_L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
                 atol_max = 1.0e-3
                 atol_L2 = 2.0e-5

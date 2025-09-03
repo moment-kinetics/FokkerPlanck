@@ -8,7 +8,6 @@ import FokkerPlanck
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs
 using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: init_fokker_planck_collisions
 using FokkerPlanck: fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp
@@ -217,16 +216,15 @@ end
               d2Gdvperpdvpa_M_exact,d2Gdvpa2_M_exact,vpa,vperp)
         println("begin C calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
         
-        fokker_planck_collision_operator_weak_form!(Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
+        fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
                                              use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients,
                                              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                                              calculate_GG = false, calculate_dGdvperp=false)
         if test_numerical_conserving_terms && test_self_operator
             # enforce the boundary conditions on CC before it is used for timestepping
-            enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
+            enforce_vpavperp_BCs!(C_M_num,vpa,vperp)
             # make ad-hoc conserving corrections
-            conserving_corrections!(fkpl_arrays.CC,Fs_M,fkpl_arrays)
-            #conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp)
+            conserving_corrections!(C_M_num,Fs_M,fkpl_arrays)
         end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
         calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.GG,fkpl_arrays.HH,fkpl_arrays.dHdvpa,fkpl_arrays.dHdvperp,
@@ -238,7 +236,6 @@ end
         @inbounds begin
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    C_M_num[ivpa,ivperp] = fkpl_arrays.CC[ivpa,ivperp]
                     G_M_num[ivpa,ivperp] = fkpl_arrays.GG[ivpa,ivperp]
                     H_M_num[ivpa,ivperp] = fkpl_arrays.HH[ivpa,ivperp]
                     dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.dHdvpa[ivpa,ivperp]

@@ -1,7 +1,7 @@
 using Dates
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: init_fokker_planck_collisions,fokker_planck_self_collisions_backward_euler_step!,
+using FokkerPlanck: fokker_plack_backward_euler_data,fokker_planck_self_collisions_backward_euler_step!,
                                     fokker_planck_self_collision_operator_weak_form!,
                                     fokker_planck_collisions_backward_euler_step!,
                                     fokker_planck_collision_operator_weak_form!,
@@ -22,7 +22,7 @@ function test_implicit_collisions(;
     bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
     # time advance info
     ntime=1::mk_int,delta_t=1.0::mk_float,
-    # nonlinear solver options
+    # nonlinea r solver options
     atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
     nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
     # model options
@@ -54,7 +54,7 @@ function test_implicit_collisions(;
     mass = [1.0]
     zeds = [1.0]
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
-    fkpl_arrays = init_fokker_planck_collisions(
+    fkpl_arrays = fokker_plack_backward_euler_data(
                         mass, zeds,
                         input_vpa,
                         input_vperp;
@@ -66,8 +66,8 @@ function test_implicit_collisions(;
                         nl_solver_nonlinear_max_iterations=nonlinear_max_iterations,
                         print_to_screen=print_diagnostics)
     # extract coordinates
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
+    vpa = fkpl_arrays.fp_operator.vpa
+    vperp = fkpl_arrays.fp_operator.vperp
     # arrays needed for advance
     if test_input_array_type
         Fgeneral = allocate_float(vpa.n,vperp.n,1,1,1)
@@ -89,11 +89,12 @@ function test_implicit_collisions(;
     # store initial pdf for output
     Fout[:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
-    fokker_planck_self_collision_operator_weak_form!(Fold, ms, nuss, fkpl_arrays,
+    CC = fkpl_arrays.CC
+    fokker_planck_self_collision_operator_weak_form!(CC, Fold, ms, nuss, fkpl_arrays.fp_operator,
                 use_conserving_corrections=test_numerical_conserving_terms)
     # print diagnostic info to screen
     if print_diagnostics
-        diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,time,ms,0)
+        diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,time,ms,0)
     end
     finish_init_time = now()
     # time advance with backward Euler
@@ -116,7 +117,7 @@ function test_implicit_collisions(;
         # diagnose the updated Fold
         time += delta_t
         if print_diagnostics
-            diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,time,ms,it)
+            diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,time,ms,it)
         end
     end
     finish_run_time = now()
@@ -190,7 +191,7 @@ function test_multispecies_implicit_collisions(;
         input_vperp = input_vperp_scalar
     end
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
-    fkpl_arrays = init_fokker_planck_collisions(
+    fkpl_arrays = fokker_plack_backward_euler_data(
                         mass, zeds,
                         input_vpa,
                         input_vperp;
@@ -202,9 +203,9 @@ function test_multispecies_implicit_collisions(;
                         nl_solver_nonlinear_max_iterations=nonlinear_max_iterations,
                         print_to_screen=print_diagnostics)
     # extract coordinates
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    species = fkpl_arrays.species
+    vpa = fkpl_arrays.fp_operator.vpa
+    vperp = fkpl_arrays.fp_operator.vperp
+    species = fkpl_arrays.fp_operator.species
     # arrays needed for advance
     if test_input_array_type
         Fgeneral = allocate_float(vpa.n,vperp.n,1,1,species.n)
@@ -212,6 +213,7 @@ function test_multispecies_implicit_collisions(;
     else
         Fold = allocate_float(vpa.n,vperp.n,species.n)
     end
+    CC = allocate_float(vpa.n,vperp.n,species.n)
     # dummy arrays needed for diagnostics
     Fout = allocate_float(vpa.n,vperp.n,species.n,2)
     Fdummy1 = allocate_float(vpa.n,vperp.n,species.n)
@@ -230,11 +232,11 @@ function test_multispecies_implicit_collisions(;
     # store initial pdf for output
     Fout[:,:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
-    fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays,
+    fokker_planck_collision_operator_weak_form!(CC, Fold, nuss, fkpl_arrays.fp_operator,
             use_conserving_corrections=test_numerical_conserving_terms_on_C)
     # print diagnostic info to screen
     if print_diagnostics
-        diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,0)
+        diagnose_F_Maxwellian(CC, Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,0)
     end
     finish_init_time = now()
     # time advance with backward Euler
@@ -260,7 +262,7 @@ function test_multispecies_implicit_collisions(;
         # diagnose the updated Fold
         time += delta_t
         if print_diagnostics
-            diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,it)
+            diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,it)
         end
     end
     finish_run_time = now()

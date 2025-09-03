@@ -15,6 +15,7 @@ export calculate_rosenbluth_potential_boundary_data_multipole!
 export calculate_rosenbluth_potential_boundary_data_delta_f_multipole!
 export fokkerplanck_arrays_direct_integration_struct
 export fokkerplanck_weakform_arrays_struct
+export fokker_plack_backward_euler_data
 export enforce_vpavperp_BCs!
 export calculate_rosenbluth_potentials_via_elliptic_solve!
 export calculate_rosenbluth_potentials_via_analytical_Maxwellian!
@@ -34,7 +35,7 @@ export matrix_inverse
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..calculus: integral
-using ..coordinates: first_derivative!, finite_element_coordinate,
+using ..coordinates: first_derivative!, finite_element_coordinate, scalar_coordinate_inputs,
                     finite_element_boundary_condition_type, zero_boundary_condition, natural_boundary_condition
 using ..velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using ..fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian
@@ -49,7 +50,8 @@ using FastGaussQuadrature
 using LagrangePolynomials: lagrange_poly
 using FiniteElementMatrices: lagrange_x,
                              d_lagrange_dx,
-                             finite_element_matrix
+                             finite_element_matrix,
+                             element_coordinates
 using JacobianFreeNewtonKrylov: nl_solver_info
 """
 Options for selecting which boundary data calculation to use
@@ -170,7 +172,7 @@ struct fokkerplanck_arrays_direct_integration_struct
                                                         print_to_screen=false::Bool)
         nvpa = vpa.n
         nvperp = vperp.n
-        
+
         G0_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
         G1_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
         H0_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
@@ -242,7 +244,7 @@ struct fokkerplanck_boundary_integration_struct
     H3_weights::boundary_integration_weights_struct
     dfdvpa::Array{mk_float,2}
     d2fdvperpdvpa::Array{mk_float,2}
-    dfdvperp::Array{mk_float,2}     
+    dfdvperp::Array{mk_float,2}
     """
     Function to allocate at `fokkerplanck_boundary_integration_struct`.
     """
@@ -300,7 +302,7 @@ struct rosenbluth_potential_boundary_data
     dGdvperp_data::vpa_vperp_boundary_data
     d2Gdvperp2_data::vpa_vperp_boundary_data
     d2Gdvperpdvpa_data::vpa_vperp_boundary_data
-    d2Gdvpa2_data::vpa_vperp_boundary_data     
+    d2Gdvpa2_data::vpa_vperp_boundary_data
     """
     Function to allocate an instance of `rosenbluth_potential_boundary_data`.
     """
@@ -520,7 +522,7 @@ struct fokkerplanck_weakform_arrays_struct
     Q_dummy::Array{mk_float,2}
     rhsvpavperp::Array{mk_float,2}
     # dummy array for the result of the calculation (multi species)
-    CCs::Array{mk_float,3}
+    # CCs::Array{mk_float,3}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
     GGs::Array{mk_float,3}
     HHs::Array{mk_float,3}
@@ -531,7 +533,7 @@ struct fokkerplanck_weakform_arrays_struct
     d2Gsdvpa2::Array{mk_float,3}
     d2Gsdvperpdvpa::Array{mk_float,3}
     # dummy array for the result of the calculation
-    CC::Array{mk_float,2}
+    # CC::Array{mk_float,2}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
     GG::Array{mk_float,2}
     HH::Array{mk_float,2}
@@ -544,30 +546,6 @@ struct fokkerplanck_weakform_arrays_struct
     FF::Array{mk_float,2}
     dFdvpa::Array{mk_float,2}
     dFdvperp::Array{mk_float,2}
-    # matrices for storing preconditioner
-    # based on I - dt * C[delta F, F]
-    CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    CC2D_sparse_constructor::sparse_matrix_constructor
-    lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
-    # dummy array for vpa vperp advection contributions
-    rhs_advection::Array{mk_float,2}
-    # dummy arrays for Jacobian-Free-Newton-Krylov solver
-    nl_solver_data::nl_solver_info{Array{mk_float,2},Array{mk_float,3},Array{mk_float,1}}
-    Fnew::Array{mk_float,2}
-    Fresidual::Array{mk_float,2}
-    F_delta_x::Array{mk_float,2}
-    F_rhs_delta::Array{mk_float,2}
-    Fv::Array{mk_float,2}
-    Fw::Array{mk_float,2}
-    # multispecies dummy arrays
-    nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
-    Fs_new::Array{mk_float,3}
-    Fs_residual::Array{mk_float,3}
-    Fs_delta_x::Array{mk_float,3}
-    Fs_rhs_delta::Array{mk_float,3}
-    Fsv::Array{mk_float,3}
-    Fsw::Array{mk_float,3}
     # collision operator moment arrays
     delta_n_sp_s::Array{mk_float,2}
     delta_m_sp_s::Array{mk_float,2}
@@ -583,19 +561,18 @@ struct fokkerplanck_weakform_arrays_struct
     delta_E::Array{mk_float,1}
     # conserving correction coefficients
     correction_coeffs_z::Array{mk_float,3}
+    # dummy array for end-of-step corrections
+    delta_pdf::Array{mk_float,3}
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
-    at the boundary and using an elliptic solve to obtain the potentials 
+    at the boundary and using an elliptic solve to obtain the potentials
     in the rest of the velocity space domain.
     """
     function fokkerplanck_weakform_arrays_struct(vpa::finite_element_coordinate,
                                                 vperp::finite_element_coordinate,
                                                 species::species_info,
                                                 boundary_data_option::boundary_data_type;
-                                                nl_solver_atol=1.0e-10::mk_float,
-                                                nl_solver_rtol=0.0::mk_float,
-                                                nl_solver_nonlinear_max_iterations=20::mk_int,
                                                 print_to_screen=true::Bool)
         bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
         if vperp.n > 1 && boundary_data_option == direct_integration
@@ -619,13 +596,12 @@ struct fokkerplanck_weakform_arrays_struct
         if print_to_screen
             println("finished LU decomposition initialisation   ", Dates.format(now(), dateformat"H:MM:SS"))
         end
-        
+
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         S_dummy = allocate_float(nvpa,nvperp)
         Q_dummy = allocate_float(nvpa,nvperp)
         rhsvpavperp = allocate_float(nvpa,nvperp)
-        
-        CC = allocate_float(nvpa,nvperp)
+
         GG = allocate_float(nvpa,nvperp)
         HH = allocate_float(nvpa,nvperp)
         dHdvpa = allocate_float(nvpa,nvperp)
@@ -635,7 +611,6 @@ struct fokkerplanck_weakform_arrays_struct
         d2Gdvpa2 = allocate_float(nvpa,nvperp)
         d2Gdvperpdvpa = allocate_float(nvpa,nvperp)
 
-        CCs = allocate_float(nvpa,nvperp,nspecies)
         GGs = allocate_float(nvpa,nvperp,nspecies)
         HHs = allocate_float(nvpa,nvperp,nspecies)
         dHsdvpa = allocate_float(nvpa,nvperp,nspecies)
@@ -644,7 +619,7 @@ struct fokkerplanck_weakform_arrays_struct
         d2Gsdvperp2 = allocate_float(nvpa,nvperp,nspecies)
         d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
         d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
-        
+
         FF = allocate_float(nvpa,nvperp)
         dFdvpa = allocate_float(nvpa,nvperp)
         dFdvperp = allocate_float(nvpa,nvperp)
@@ -654,7 +629,128 @@ struct fokkerplanck_weakform_arrays_struct
         for is in 1:nspecies
             lu_objs_CC2D[is] = lu_obj_CC2D
         end
-        rhs_advection = allocate_float(nvpa,nvperp)
+        # multi-species conserving corrections
+        delta_n_sp_s = allocate_float(nspecies,nspecies)
+        delta_m_sp_s = allocate_float(nspecies,nspecies)
+        delta_p_sp_s = allocate_float(nspecies,nspecies)
+        density = allocate_float(nspecies)
+        upar = allocate_float(nspecies)
+        pressure = allocate_float(nspecies)
+        ppar = allocate_float(nspecies)
+        qpar = allocate_float(nspecies)
+        rmom = allocate_float(nspecies)
+        delta_n = allocate_float(nspecies)
+        delta_P = allocate_float(nspecies)
+        delta_E = allocate_float(nspecies)
+        correction_coeffs_z = allocate_float(3,nspecies,nspecies)
+        delta_pdf = allocate_float(nvpa,nvperp,nspecies)
+        return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
+                    MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
+                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
+                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
+                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
+                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
+                    YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
+                    #CCs,
+                    GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
+                    #CC,
+                    GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
+                    FF, dFdvpa, dFdvperp,
+                    # CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
+                    # nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
+                    # nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
+                    delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
+                    density, upar, pressure, ppar, qpar, rmom,
+                    delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf)
+    end
+end
+
+struct fokker_plack_backward_euler_data
+    # arrays for storing collision operator computed
+    # when iterating in the backward Euler step
+    CC::Array{mk_float,2}
+    CCs::Array{mk_float,3}
+    # matrices for storing preconditioner
+    # based on I - dt * C[delta F, F]
+    CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    CC2D_sparse_constructor::sparse_matrix_constructor
+    lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
+    # dummy arrays for Jacobian-Free-Newton-Krylov solver
+    nl_solver_data::nl_solver_info{Array{mk_float,2},Array{mk_float,3},Array{mk_float,1}}
+    Fnew::Array{mk_float,2}
+    Fresidual::Array{mk_float,2}
+    F_delta_x::Array{mk_float,2}
+    F_rhs_delta::Array{mk_float,2}
+    Fv::Array{mk_float,2}
+    Fw::Array{mk_float,2}
+    # multispecies dummy arrays
+    nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
+    Fs_new::Array{mk_float,3}
+    Fs_residual::Array{mk_float,3}
+    Fs_delta_x::Array{mk_float,3}
+    Fs_rhs_delta::Array{mk_float,3}
+    Fsv::Array{mk_float,3}
+    Fsw::Array{mk_float,3}
+    fp_operator::fokkerplanck_weakform_arrays_struct
+    # constructor with interface and JFNK optional arguments
+    """
+    Wrapper function to provide the interface for initialising the
+    Fokker Planck operator arrays and operators. We require that
+    the inputs are provided with the types
+    ```
+        inputs =  scalar_coordinate_inputs(ngrid, nelement, L)
+    ```
+    or
+    ```
+        inputs = Array{element_coordinates,1}(undef, nelement)
+    ```
+    where the former type is defined in `FokkerPlanck.coordinates`
+    and the latterr is defined in `FiniteElementMatrices`.
+    """
+    function fokker_plack_backward_euler_data(
+        mass::Vector{mk_float},
+        zeds::Vector{mk_float},
+        inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
+        inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
+        bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
+        bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+        boundary_data_option=multipole_expansion::boundary_data_type,
+        nl_solver_atol=1.0e-10::mk_float,
+        nl_solver_rtol=0.0::mk_float,
+        nl_solver_nonlinear_max_iterations=20::mk_int,
+        print_to_screen=true::Bool)
+
+        # create the coordinate structs from the input data
+        vperp = finite_element_coordinate("vperp", inputs_vperp,
+                                    bc=bc_vperp)
+        vpa = finite_element_coordinate("vpa", inputs_vpa,
+                                    bc=bc_vpa)
+        species = species_info(mass,zeds)
+        # use constructor function for fokkerplanck_weakform_arrays_struct
+        return fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+                    nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
+                    print_to_screen)
+    end
+    # constructor without optional arguments
+    function fokker_plack_backward_euler_data(vpa::finite_element_coordinate,
+                                    vperp::finite_element_coordinate,
+                                    species::species_info,
+                                    boundary_data_option::boundary_data_type,
+                                    nl_solver_atol::mk_float,
+                                    nl_solver_rtol::mk_float,
+                                    nl_solver_nonlinear_max_iterations::mk_int,
+                                    print_to_screen::Bool)
+        nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
+        # collision operator arrays for intermediate results
+        CC = allocate_float(nvpa,nvperp)
+        CCs = allocate_float(nvpa,nvperp,nspecies)
+        # preconditioner matrix
+        CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
+        lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
+        for is in 1:nspecies
+            lu_objs_CC2D[is] = lu_obj_CC2D
+        end
         # dummy arrays for JFNK
         nl_solver_data = setup_fp_nl_solve(vpa,vperp;
                                         atol=nl_solver_atol,
@@ -676,36 +772,18 @@ struct fokkerplanck_weakform_arrays_struct
         Fs_rhs_delta = allocate_float(nvpa,nvperp,nspecies)
         Fsv = allocate_float(nvpa,nvperp,nspecies)
         Fsw = allocate_float(nvpa,nvperp,nspecies)
-        delta_n_sp_s = allocate_float(nspecies,nspecies)
-        delta_m_sp_s = allocate_float(nspecies,nspecies)
-        delta_p_sp_s = allocate_float(nspecies,nspecies)
-        density = allocate_float(nspecies)
-        upar = allocate_float(nspecies)
-        pressure = allocate_float(nspecies)
-        ppar = allocate_float(nspecies)
-        qpar = allocate_float(nspecies)
-        rmom = allocate_float(nspecies)
-        delta_n = allocate_float(nspecies)
-        delta_P = allocate_float(nspecies)
-        delta_E = allocate_float(nspecies)
-        correction_coeffs_z = allocate_float(3,nspecies,nspecies)
-        return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
-                    MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
-                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
-                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
-                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
-                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
-                    YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
-                    CCs, GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
-                    CC, GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
-                    FF, dFdvpa, dFdvperp, 
-                    CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
-                    rhs_advection,
-                    nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
-                    nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
-                    delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
-                    density, upar, pressure, ppar, qpar, rmom,
-                    delta_n, delta_P, delta_E, correction_coeffs_z)
+        # data for the FP operators
+        fp_operator = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,
+                                                boundary_data_option;
+                                                print_to_screen=print_to_screen)
+        return new(CC,CCs,
+            CC2D_sparse,CC2D_sparse_constructor,
+            lu_obj_CC2D,lu_objs_CC2D,
+            nl_solver_data,
+            Fnew,Fresidual,F_delta_x,F_rhs_delta,Fv,Fw,
+            nl_solver_data_s,
+            Fs_new,Fs_residual,Fs_delta_x,Fs_rhs_delta,Fsv,Fsw,
+            fp_operator)
     end
 end
 
@@ -723,9 +801,9 @@ function init_Rosenbluth_potential_integration_weights!(G0_weights::Twgts,G1_wei
     if print_to_screen
         println("beginning weights calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # precalculated weights, integrating over Lagrange polynomials
-    @inbounds begin 
+    @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
                 #limits where checks required to determine which divergence-safe grid is needed
@@ -776,7 +854,7 @@ function setup_basic_quadratures(vpa::finite_element_coordinate,
     if print_to_screen
         println("setting up GL quadrature   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # get Gauss-Legendre points and weights on (-1,1)
     ngrid = max(vpa.ngrid,vperp.ngrid)
     nquad = 2*ngrid
@@ -827,7 +905,7 @@ function init_Rosenbluth_potential_boundary_integration_weights!(G0_weights::Twg
     if print_to_screen
         println("beginning (boundary) weights calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # precalculate weights, integrating over Lagrange polynomials
     # first compute weights along lower vpa boundary
     ivpa = 1 # lower_vpa_boundary
@@ -1575,7 +1653,7 @@ function calculate_boundary_data!(func_data::vpa_vperp_boundary_data,
             end
         end
     end
-    
+
     return nothing
 end
 
@@ -2545,25 +2623,24 @@ end
 
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     delta_t::mk_float,ms::mk_float,msp::mk_float,nussp::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+    fkpl_arrays::fokker_plack_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
 
-    #Precon2D_sparse = fkpl_arrays.Precon2D_sparse
-    #CC2D_sparse = fkpl_arrays.CC2D_sparse
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
     CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
-    YY_arrays = fkpl_arrays.YY_arrays
-    GG = fkpl_arrays.GG
-    HH = fkpl_arrays.HH
-    dHdvpa = fkpl_arrays.dHdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dGdvperp = fkpl_arrays.dGdvperp
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
+    fp_operator = fkpl_arrays.fp_operator
+    vpa = fp_operator.vpa
+    vperp = fp_operator.vperp
+    YY_arrays = fp_operator.YY_arrays
+    GG = fp_operator.GG
+    HH = fp_operator.HH
+    dHdvpa = fp_operator.dHdvpa
+    dHdvperp = fp_operator.dHdvperp
+    dGdvperp = fp_operator.dGdvperp
+    d2Gdvperp2 = fp_operator.d2Gdvperp2
+    d2Gdvpa2 = fp_operator.d2Gdvpa2
+    d2Gdvperpdvpa = fp_operator.d2Gdvperpdvpa
 
     # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
     if use_Maxwellian_Rosenbluth_coefficients
@@ -2572,13 +2649,13 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
              d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,
-             vpa,vperp,fkpl_arrays,msp,
+             vpa,vperp,fp_operator,msp,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
-    assemble_collision_operator_preconditioner_rhs!(
+    assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
             d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-            delta_t,nussp,fkpl_arrays)
+            delta_t,nussp,fp_operator)
     # should improve on this step to avoid recreating the sparse array if possible.
     fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
     lu!(fkpl_arrays.lu_obj_CC2D, fkpl_arrays.CC2D_sparse)
@@ -2586,33 +2663,32 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
 end
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     delta_t::mk_float,nuref::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+    fkpl_arrays::fokker_plack_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
 
-    #Precon2D_sparse = fkpl_arrays.Precon2D_sparse
-    #CC2D_sparse = fkpl_arrays.CC2D_sparse
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    species = fkpl_arrays.species
     CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
-    YY_arrays = fkpl_arrays.YY_arrays
+    fp_operator = fkpl_arrays.fp_operator
+    vpa = fp_operator.vpa
+    vperp = fp_operator.vperp
+    species = fp_operator.species
+    YY_arrays = fp_operator.YY_arrays
     # dummy arrays for summed Rosenbluth potentials
-    dHdvpa_sum = fkpl_arrays.dHdvpa
-    dHdvperp_sum = fkpl_arrays.dHdvperp
-    d2Gdvperp2_sum = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2_sum = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa_sum = fkpl_arrays.d2Gdvperpdvpa
+    dHdvpa_sum = fp_operator.dHdvpa
+    dHdvperp_sum = fp_operator.dHdvperp
+    d2Gdvperp2_sum = fp_operator.d2Gdvperp2
+    d2Gdvpa2_sum = fp_operator.d2Gdvpa2
+    d2Gdvperpdvpa_sum = fp_operator.d2Gdvperpdvpa
     # dummy arrays for Rosenbluth potentials by species
-    GGs = fkpl_arrays.GGs
-    HHs = fkpl_arrays.HHs
-    dHsdvpa = fkpl_arrays.dHsdvpa
-    dHsdvperp = fkpl_arrays.dHsdvperp
-    dGsdvperp = fkpl_arrays.dGsdvperp
-    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
-    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
-    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
+    GGs = fp_operator.GGs
+    HHs = fp_operator.HHs
+    dHsdvpa = fp_operator.dHsdvpa
+    dHsdvperp = fp_operator.dHsdvperp
+    dGsdvperp = fp_operator.dGsdvperp
+    d2Gsdvperp2 = fp_operator.d2Gsdvperp2
+    d2Gsdvpa2 = fp_operator.d2Gsdvpa2
+    d2Gsdvperpdvpa = fp_operator.d2Gsdvperpdvpa
 
     # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
     if use_Maxwellian_Rosenbluth_coefficients
@@ -2627,7 +2703,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
                 GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
                 d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fkpl_arrays,species.mass[is],
+                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fp_operator,species.mass[is],
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -2640,9 +2716,9 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
                     d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
                     d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
                     species,is)
-            assemble_collision_operator_preconditioner_rhs!(
+            assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
                 d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                delta_t,nuref,fkpl_arrays)
+                delta_t,nuref,fp_operator)
             # should improve on this step to avoid recreating the sparse array if possible.
             fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
             lu!(fkpl_arrays.lu_objs_CC2D[is], fkpl_arrays.CC2D_sparse)
@@ -2650,7 +2726,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     end
     return nothing
 end
-function assemble_collision_operator_preconditioner_rhs!(
+function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor::sparse_matrix_constructor,
     d2Gdvpa2::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,
     delta_t::mk_float,nuref::mk_float,
     fkpl_arrays::fokkerplanck_weakform_arrays_struct) where Tpdf <:AbstractArray{mk_float,2}
@@ -2660,7 +2736,6 @@ function assemble_collision_operator_preconditioner_rhs!(
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
-    CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
     YY_arrays = fkpl_arrays.YY_arrays
     @inbounds begin
         # set the values of the matrix to zero before assembly
@@ -2797,14 +2872,14 @@ function assemble_collision_operator_preconditioner_rhs!(
 end
 
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
-                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                                    fkpl_arrays::fokker_plack_backward_euler_data)
     # (the LU decomposition object for)
     # the backward Euler time advance matrix
     # for linearised test particle collisions K * dF = C[dF, F^n+1].
     # this is also the LU decomposition of the approximate Jacobian
     # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     lu_CC = fkpl_arrays.lu_obj_CC2D
-    advance_linearised_test_particle_collisions!(pdf,fkpl_arrays,lu_CC)
+    advance_linearised_test_particle_collisions!(pdf,fkpl_arrays.fp_operator,lu_CC)
     return nothing
 end
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
@@ -2837,16 +2912,16 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     return nothing
 end
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,3},
-                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                                    fkpl_arrays::fokker_plack_backward_euler_data)
     # (the vector of LU decomposition objects for)
     # the backward Euler time advance matrix
     # for multi-species linearised test particle collisions K * dF = C[dF, F^n+1].
     # this is also the LU decomposition of the approximate Jacobian
     # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     lu_CC = fkpl_arrays.lu_objs_CC2D
-    species = fkpl_arrays.species
+    species = fkpl_arrays.fp_operator.species
     for is in 1:species.n
-        @views advance_linearised_test_particle_collisions!(pdf[:,:,is],fkpl_arrays,lu_CC[is])
+        @views advance_linearised_test_particle_collisions!(pdf[:,:,is],fkpl_arrays.fp_operator,lu_CC[is])
     end
     return nothing
 end
@@ -2978,7 +3053,7 @@ function elliptic_solve!(field::AbstractArray{mk_float,2},source_1::Tpdf,source_
             matrix_rhs_1::AbstractSparseArray{mk_float,mk_int,2},
             matrix_rhs_2::AbstractSparseArray{mk_float,mk_int,2},
             rhs::Tpdf,vpa::finite_element_coordinate,
-            vperp::finite_element_coordinate) where Tpdf <: AbstractArray{mk_float,2} 
+            vperp::finite_element_coordinate) where Tpdf <: AbstractArray{mk_float,2}
 
     @inbounds begin
         # assemble the rhs of the weak system
@@ -3115,7 +3190,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
                     rhsvpavperp, vpa, vperp)
     elliptic_solve!(dHdvperp, S_dummy, rpbd.dHdvperp_data, lu_obj_LV, PUperp2D_sparse,
                     rhsvpavperp, vpa, vperp)
-    
+
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -3136,7 +3211,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
                     rhsvpavperp, vpa, vperp)
     elliptic_solve!(d2Gdvperpdvpa, S_dummy, rpbd.d2Gdvperpdvpa_data, lu_obj_LV,
                     PPparPUperp2D_sparse, rhsvpavperp, vpa, vperp)
-    
+
     if algebraic_solve_for_d2Gdvperp2
         @inbounds begin
             for ivperp in 1:vperp.n
@@ -3475,7 +3550,7 @@ A_{02} & A_{12} & A_{22} \\\\
 \\end{array}
 ```
 appropriate for moment numerical conserving terms.
- 
+
 """
 function symmetric_matrix_inverse(A00::mk_float,A01::mk_float,A02::mk_float,
                             A11::mk_float,A12::mk_float,A22::mk_float,
@@ -3541,7 +3616,7 @@ Modifies the collision operator such that the operator becomes
 ```math
 C_{ss} = C^\\ast_{ss}[F_s,F_{s}] - \\left(x_0 + x_1(v_{\\|}-u_{\\|})+ x_2(v_\\perp^2 +(v_{\\|}-u_{\\|})^2)\\right)F_s
 ```
-where \$C^\\ast_{ss}[F_s,F_{s}]\$ is the weak-form self-collision operator computed using 
+where \$C^\\ast_{ss}[F_s,F_{s}]\$ is the weak-form self-collision operator computed using
 the finite-element implementation, \$u_{\\|}\$ is the parallel velocity of \$F_s\$,
 and \$x_0,x_1,x_2\$ are parameters that are chosen so that \$C_{ss}\$
 conserves density, parallel velocity and pressure of \$F_s\$.
@@ -3564,14 +3639,14 @@ function conserving_corrections!(CC::AbstractArray{mk_float,2},
     dn = get_density(CC, vpa, vperp)
     du = get_upar(CC, vpa, vperp, 1.0)
     dp = get_pressure(CC, vpa, vperp, upar, mass)
-    
+
     # form the appropriate matrix coefficients
     b0, b1, b2 = mass*dn, mass*(du - upar*dn), 3.0*dp
     A00, A02, A11, A12, A22 = mass*dens, 3.0*pressure, ppar, 2.0*qpar, rmom
 
     # obtain the coefficients for the corrections
     (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
-    
+
     # correct CC
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -3727,9 +3802,7 @@ function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
     delta_E = fkpl_arrays.delta_E
 
     # compute deltaF = F* - F^n, where F* is the Fnew from the uncorrected FP solve
-    # use Fsw as a dummy array (vpa,vperp,species)
-    # as this is now free after leaving newton_solve!()
-    delta_pdf = fkpl_arrays.Fsw
+    delta_pdf = fkpl_arrays.delta_pdf
     @inbounds begin
         for is in 1:species.n
             @views enforce_vpavperp_BCs!(pdf_new[:,:,is],vpa,vperp)
@@ -3788,7 +3861,7 @@ numerical conservation of the `density` in the collision operator.
 ```math
 C_{ss^\\prime} = C^\\ast_{ss}[F_s,F_{s^\\prime}] - x_0 F_s
 ```
-where \$C^\\ast_{ss}[F_s,F_{s^\\prime}]\$ is the weak-form collision operator computed using 
+where \$C^\\ast_{ss}[F_s,F_{s^\\prime}]\$ is the weak-form collision operator computed using
 the finite-element implementation.
 """
 function density_conserving_correction!(CC::AbstractArray{mk_float,2},
@@ -3797,13 +3870,13 @@ function density_conserving_correction!(CC::AbstractArray{mk_float,2},
                             vperp::finite_element_coordinate)
     # compute density of the input pdf
     dens =  get_density(pdf_in, vpa, vperp)
-    
+
     # compute density of the numerical collision operator
     dn = get_density(CC, vpa, vperp)
-    
+
     # obtain the coefficient for the correction
     x0 = dn/dens
-    
+
     # correct CC
     @inbounds begin
         for ivperp in 1:vperp.n
