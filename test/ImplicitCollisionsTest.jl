@@ -160,6 +160,7 @@ function test_multispecies_implicit_collisions(;
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
     test_numerical_conserving_terms=false::Bool,
+    test_numerical_conserving_terms_on_C=true::Bool,
     boundary_data_option=multipole_expansion::boundary_data_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
@@ -230,7 +231,7 @@ function test_multispecies_implicit_collisions(;
     Fout[:,:,:,1] .= Fold
     # get initial C[F,F] for entropy production diagnostic
     fokker_planck_collision_operator_weak_form!(Fold, nuss, fkpl_arrays,
-             use_conserving_corrections=test_numerical_conserving_terms)
+            use_conserving_corrections=test_numerical_conserving_terms_on_C)
     # print diagnostic info to screen
     if print_diagnostics
         diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays,moments,time,0)
@@ -241,6 +242,7 @@ function test_multispecies_implicit_collisions(;
         # use Fold = F^n to obtain Fnew = F^n+1 for n = it
         fokker_planck_collisions_backward_euler_step!(Fold, delta_t, nuss, fkpl_arrays,
             use_conserving_corrections=test_numerical_conserving_terms,
+            use_conserving_corrections_on_C=test_numerical_conserving_terms_on_C,
             test_particle_preconditioner=test_particle_preconditioner,
             test_linearised_advance=test_linearised_advance,
             use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)

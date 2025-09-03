@@ -562,6 +562,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
                         delta_t::mk_float, nuref::mk_float,
                         fkpl_arrays::fokkerplanck_weakform_arrays_struct;
                         use_conserving_corrections=true::Bool,
+                        use_conserving_corrections_on_C=true::Bool,
                         test_linearised_advance=false::Bool,
                         test_particle_preconditioner=true::Bool,
                         use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool)
@@ -575,7 +576,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         fokker_planck_collision_operator_weak_form!(
                         Fnew, nuref,
                         fkpl_arrays;
-                        use_conserving_corrections=use_conserving_corrections)
+                        use_conserving_corrections=(use_conserving_corrections && use_conserving_corrections_on_C))
         @inbounds begin
             for is in 1:species.n
                 for ivperp in 1:vperp.n
