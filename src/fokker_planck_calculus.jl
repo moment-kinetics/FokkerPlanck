@@ -613,12 +613,6 @@ struct fokkerplanck_weakform_arrays_struct
         d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
         d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
 
-        # preconditioner matrix
-        CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
-        lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
-        for is in 1:nspecies
-            lu_objs_CC2D[is] = lu_obj_CC2D
-        end
         # multi-species conserving corrections
         delta_n_sp_s = allocate_float(nspecies,nspecies)
         delta_m_sp_s = allocate_float(nspecies,nspecies)
@@ -641,13 +635,8 @@ struct fokkerplanck_weakform_arrays_struct
                     PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
                     lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
                     YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
-                    #CCs,
                     GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
-                    #CC,
                     GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
-                    # CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
-                    # nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
-                    # nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
                     density, upar, pressure, ppar, qpar, rmom,
                     delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf)
