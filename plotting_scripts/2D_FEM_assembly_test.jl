@@ -90,9 +90,10 @@ end
         start_init_time = now()
         species = species_info([1.0],[1.0])
         fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option)
-        KKpar2D_with_BC_terms_sparse = fkpl_arrays.KKpar2D_with_BC_terms_sparse
-        KKperp2D_with_BC_terms_sparse = fkpl_arrays.KKperp2D_with_BC_terms_sparse
-        lu_obj_MM = fkpl_arrays.lu_obj_MM
+        matrix_operators = fkpl_arrays.fprp_data.matrix_operators
+        KKpar2D_with_BC_terms_sparse = matrix_operators.KKpar2D_with_BC_terms_sparse
+        KKperp2D_with_BC_terms_sparse = matrix_operators.KKperp2D_with_BC_terms_sparse
+        lu_obj_MM = matrix_operators.lu_obj_MM
         finish_init_time = now()
         
         fvpavperp = Array{mk_float,2}(undef,vpa.n,vperp.n)
@@ -229,7 +230,7 @@ end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
         calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.GG,fkpl_arrays.HH,fkpl_arrays.dHdvpa,fkpl_arrays.dHdvperp,
              fkpl_arrays.d2Gdvpa2,fkpl_arrays.dGdvperp,fkpl_arrays.d2Gdvperpdvpa,fkpl_arrays.d2Gdvperp2,F_M,
-             vpa,vperp,fkpl_arrays,msp;
+             vpa,vperp,fkpl_arrays.fprp_data,msp;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=true,calculate_dGdvperp=true)
         # extract C[Fs,Fs'] result
         # and Rosenbluth potentials for testing
@@ -256,7 +257,7 @@ end
         # test the boundary data calculation
         if !use_Maxwellian_Rosenbluth_coefficients
             max_H_err, max_dHdvpa_err, max_dHdvperp_err, max_G_err, max_dGdvperp_err,
-            max_d2Gdvperp2_err, max_d2Gdvperpdvpa_err, max_d2Gdvpa2_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.rpbd,rpbd_exact,vpa,vperp)
+            max_d2Gdvperp2_err, max_d2Gdvperpdvpa_err, max_d2Gdvpa2_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_data.rpbd,rpbd_exact,vpa,vperp)
         end
         dummy_array = Array{mk_float,2}(undef,vpa.n,vperp.n)
         fkerr.H_M.max, fkerr.H_M.L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array)
@@ -270,7 +271,7 @@ end
         fkerr.C_M.max, fkerr.C_M.L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array)
         
         # calculate the entropy production
-        lnfC = fkpl_arrays.rhsvpavperp
+        lnfC = matrix_operators.rhsvpavperp
         @inbounds begin
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n

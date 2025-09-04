@@ -749,9 +749,10 @@ function runtests()
             species = species_info([1.0],[1.0])
             fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                                     print_to_screen=print_to_screen)
-            KKpar2D_with_BC_terms_sparse = fkpl_arrays.KKpar2D_with_BC_terms_sparse
-            KKperp2D_with_BC_terms_sparse = fkpl_arrays.KKperp2D_with_BC_terms_sparse
-            lu_obj_MM = fkpl_arrays.lu_obj_MM
+            matrix_operators = fkpl_arrays.fprp_data.matrix_operators
+            KKpar2D_with_BC_terms_sparse = matrix_operators.KKpar2D_with_BC_terms_sparse
+            KKperp2D_with_BC_terms_sparse = matrix_operators.KKperp2D_with_BC_terms_sparse
+            lu_obj_MM = matrix_operators.lu_obj_MM
 
             dummy_array = allocate_float(vpa.n,vperp.n)
             fvpavperp = allocate_float(vpa.n,vperp.n)
@@ -865,7 +866,7 @@ function runtests()
                      fkpl_arrays.GG, fkpl_arrays.HH, fkpl_arrays.dHdvpa, fkpl_arrays.dHdvperp,
                      fkpl_arrays.d2Gdvpa2, fkpl_arrays.dGdvperp, fkpl_arrays.d2Gdvperpdvpa,
                      fkpl_arrays.d2Gdvperp2, F_M, vpa, vperp,
-                     fkpl_arrays, species.mass[1]; algebraic_solve_for_d2Gdvperp2=false,
+                     fkpl_arrays.fprp_data, species.mass[1]; algebraic_solve_for_d2Gdvperp2=false,
                      calculate_GG=true, calculate_dGdvperp=true)
                 # extract C[Fs,Fs'] result
                 # and Rosenbluth potentials for testing
@@ -890,7 +891,7 @@ function runtests()
                 max_H_boundary_data_err, max_dHdvpa_boundary_data_err,
                 max_dHdvperp_boundary_data_err, max_G_boundary_data_err,
                 max_dGdvperp_boundary_data_err, max_d2Gdvperp2_boundary_data_err,
-                max_d2Gdvperpdvpa_boundary_data_err, max_d2Gdvpa2_boundary_data_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.rpbd,rpbd_exact,vpa,vperp,print_to_screen=print_to_screen)
+                max_d2Gdvperpdvpa_boundary_data_err, max_d2Gdvpa2_boundary_data_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_data.rpbd,rpbd_exact,vpa,vperp,print_to_screen=print_to_screen)
                 if boundary_data_option==multipole_expansion
                     atol_max_H = 5.0e-8
                     atol_max_dHdvpa = 5.0e-8

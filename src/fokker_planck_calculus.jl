@@ -7,9 +7,7 @@ the full-F Fokker-Planck collision operator.
 """
 module fokker_planck_calculus
 
-export assemble_matrix_operators_dirichlet_bc_sparse
 export assemble_explicit_collision_operator_rhs_serial!
-export YY_collision_operator_arrays
 export calculate_rosenbluth_potential_boundary_data!
 export calculate_rosenbluth_potential_boundary_data_multipole!
 export calculate_rosenbluth_potential_boundary_data_delta_f_multipole!
@@ -19,14 +17,10 @@ export fokker_plack_backward_euler_data
 export enforce_vpavperp_BCs!
 export calculate_rosenbluth_potentials_via_elliptic_solve!
 export calculate_rosenbluth_potentials_via_analytical_Maxwellian!
-export allocate_preconditioner_matrix
 export calculate_test_particle_preconditioner!
 export advance_linearised_test_particle_collisions!
 export density_conserving_correction!, conserving_corrections!
 export species_info, calculate_cross_species_rosenbluth_potential_sums!
-# testing
-export calculate_rosenbluth_potential_boundary_data_exact!
-export allocate_rosenbluth_potential_boundary_data
 export calculate_rosenbluth_potential_boundary_data_exact!
 export test_rosenbluth_potential_boundary_data
 export interpolate_2D_vspace!
@@ -451,6 +445,274 @@ struct YY_collision_operator_arrays
     end
 end
 
+
+struct assembled_matrix_operators_sparse
+    # assembled 2D weak-form matrices
+    MM2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKpar2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKperp2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LP2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LV2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LB2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PPparPUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PPpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    MMparMNperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KPperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    # lu decomposition objects
+    lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LP::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LV::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LB::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    # dummy arrays for elliptic solvers
+    S_dummy::Array{mk_float,2}
+    Q_dummy::Array{mk_float,2}
+    rhsvpavperp::Array{mk_float,2}
+    """
+    Function to contruct the global sparse matrices used to solve
+    the elliptic PDEs for the Rosenbluth potentials. Uses a sparse matrix
+    construction method. The matrices are 2D in the compound index `ic`
+    which indexes the velocity space labelled by `ivpa,ivperp`.
+    Dirichlet boundary conditions are imposed in the appropriate stiffness
+    matrices by setting the boundary row to be the Kronecker delta
+    (0 except where `ivpa = ivpap` and `ivperp = ivperpp`).
+    """
+    function assembled_matrix_operators_sparse(vpa::finite_element_coordinate,
+                                                    vperp::finite_element_coordinate,
+                                                    YY_arrays::YY_collision_operator_arrays;
+                                                    print_to_screen=true)
+        # Assemble a 2D mass matrix in the global compound coordinate
+        nc_global = vpa.n*vperp.n
+        ntot_vpa = (vpa.nelement - 1)*(vpa.ngrid^2 - 1) + vpa.ngrid^2
+        ntot_vperp = (vperp.nelement - 1)*(vperp.ngrid^2 - 1) + vperp.ngrid^2
+        nsparse = ntot_vpa*ntot_vperp
+
+        MM2D = sparse_matrix_constructor(nsparse)
+        KKpar2D = sparse_matrix_constructor(nsparse)
+        KKperp2D = sparse_matrix_constructor(nsparse)
+        KKpar2D_with_BC_terms = sparse_matrix_constructor(nsparse)
+        KKperp2D_with_BC_terms = sparse_matrix_constructor(nsparse)
+        PUperp2D = sparse_matrix_constructor(nsparse)
+        PPparPUperp2D = sparse_matrix_constructor(nsparse)
+        PPpar2D = sparse_matrix_constructor(nsparse)
+        MMparMNperp2D = sparse_matrix_constructor(nsparse)
+        KPperp2D = sparse_matrix_constructor(nsparse)
+        # Laplacian matrix
+        LP2D = sparse_matrix_constructor(nsparse)
+        # Modified Laplacian matrix (for d / d vperp potentials)
+        LV2D = sparse_matrix_constructor(nsparse)
+        # Modified Laplacian matrix (for d^2 / d vperp^2 potentials)
+        LB2D = sparse_matrix_constructor(nsparse)
+
+        impose_BC_at_zero_vperp = false
+        if print_to_screen
+            println("begin elliptic operator assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
+        end
+        for ielement_vperp in 1:vperp.nelement
+            @views MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
+            @views MRperp = YY_arrays.MRperp[:,:,ielement_vperp]
+            @views MNperp = YY_arrays.MNperp[:,:,ielement_vperp]
+            @views KKperp = YY_arrays.KKperp[:,:,ielement_vperp]
+            @views KJperp = YY_arrays.KJperp[:,:,ielement_vperp]
+            @views PPperp = YY_arrays.PPperp[:,:,ielement_vperp]
+            @views PUperp = YY_arrays.PUperp[:,:,ielement_vperp]
+            @views KKperp_with_BC_terms = YY_arrays.KKperp_with_BC_terms[:,:,ielement_vperp]
+            for ielement_vpa in 1:vpa.nelement
+                @views MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
+                @views KKpar = YY_arrays.KKpar[:,:,ielement_vpa]
+                @views KKpar_with_BC_terms = YY_arrays.KKpar_with_BC_terms[:,:,ielement_vpa]
+                @views PPpar = YY_arrays.PPpar[:,:,ielement_vpa]
+                for ivperpp_local in 1:vperp.ngrid
+                    for ivperp_local in 1:vperp.ngrid
+                        for ivpap_local in 1:vpa.ngrid
+                            for ivpa_local in 1:vpa.ngrid
+                                ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                                icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpap_local,ivperpp_local) #get_indices(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivpap_local,ivperp_local,ivperpp_local)
+                                icsc = icsc_func(ivpa_local,ivpap_local,ielement_vpa,
+                                            vpa.ngrid,vpa.nelement,
+                                            ivperp_local,ivperpp_local,
+                                            ielement_vperp,
+                                            vperp.ngrid,vperp.nelement)
+                                #println("ielement_vpa: ",ielement_vpa," ielement_vperp: ",ielement_vperp)
+                                #println("ivpa_local: ",ivpa_local," ivpap_local: ",ivpap_local)
+                                #println("ivperp_local: ",ivperp_local," ivperpp_local: ",ivperpp_local)
+                                #println("ic: ",ic_global," icp: ",icp_global)
+                                # boundary condition possibilities
+                                lower_boundary_row_vpa = (ielement_vpa == 1 && ivpa_local == 1)
+                                upper_boundary_row_vpa = (ielement_vpa == vpa.nelement && ivpa_local == vpa.ngrid)
+                                lower_boundary_row_vperp = (ielement_vperp == 1 && ivperp_local == 1)
+                                upper_boundary_row_vperp = (ielement_vperp == vperp.nelement && ivperp_local == vperp.ngrid)
+
+
+                                if lower_boundary_row_vpa
+                                    if ivpap_local == 1 && ivperp_local == ivperpp_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif upper_boundary_row_vpa
+                                    if ivpap_local == vpa.ngrid && ivperp_local == ivperpp_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif lower_boundary_row_vperp && impose_BC_at_zero_vperp
+                                    if ivperpp_local == 1 && ivpa_local == ivpap_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif upper_boundary_row_vperp
+                                    if ivperpp_local == vperp.ngrid && ivpa_local == ivpap_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                else
+                                    # assign Laplacian matrix data
+                                    assemble_constructor_data!(LP2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                KKperp[ivperp_local,ivperpp_local]))
+                                    assemble_constructor_data!(LV2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MRperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                PPperp[ivperp_local,ivperpp_local] -
+                                                MNperp[ivperp_local,ivperpp_local])))
+                                    assemble_constructor_data!(LB2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MRperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                PPperp[ivperp_local,ivperpp_local] -
+                                            4.0*MNperp[ivperp_local,ivperpp_local])))
+                                end
+                                #assign mass matrix
+                                assemble_constructor_data!(MM2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+
+                                # assign K matrices (no explicit boundary terms)
+                                assemble_constructor_data!(KKpar2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KKperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                KKperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KPperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                2.0*PPperp[ivperp_local,ivperpp_local] -
+                                                2.0*MNperp[ivperp_local,ivperpp_local])))
+
+                                # assign K matrices (with explicit boundary terms from integration by parts)
+                                assemble_constructor_data!(KKpar2D_with_BC_terms,icsc,ic_global,icp_global,
+                                                (KKpar_with_BC_terms[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KKperp2D_with_BC_terms,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                KKperp_with_BC_terms[ivperp_local,ivperpp_local]))
+                                # assign PU matrix
+                                assemble_constructor_data!(PUperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                PUperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(PPparPUperp2D,icsc,ic_global,icp_global,
+                                                (PPpar[ivpa_local,ivpap_local]*
+                                                PUperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(PPpar2D,icsc,ic_global,icp_global,
+                                                (PPpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                # assign RHS mass matrix for d2Gdvperp2
+                                assemble_constructor_data!(MMparMNperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                MNperp[ivperp_local,ivperpp_local]))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        MM2D_sparse = create_sparse_matrix(MM2D)
+        KKpar2D_sparse = create_sparse_matrix(KKpar2D)
+        KKperp2D_sparse = create_sparse_matrix(KKperp2D)
+        KKpar2D_with_BC_terms_sparse = create_sparse_matrix(KKpar2D_with_BC_terms)
+        KKperp2D_with_BC_terms_sparse = create_sparse_matrix(KKperp2D_with_BC_terms)
+        LP2D_sparse = create_sparse_matrix(LP2D)
+        LV2D_sparse = create_sparse_matrix(LV2D)
+        LB2D_sparse = create_sparse_matrix(LB2D)
+        KPperp2D_sparse = create_sparse_matrix(KPperp2D)
+        PUperp2D_sparse = create_sparse_matrix(PUperp2D)
+        PPparPUperp2D_sparse = create_sparse_matrix(PPparPUperp2D)
+        PPpar2D_sparse = create_sparse_matrix(PPpar2D)
+        MMparMNperp2D_sparse = create_sparse_matrix(MMparMNperp2D)
+        if print_to_screen
+            println("finished elliptic operator constructor assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
+        end
+        # lu objects for the assembled operators
+        lu_obj_MM = lu(MM2D_sparse)
+        lu_obj_LP = lu(LP2D_sparse)
+        lu_obj_LV = lu(LV2D_sparse)
+        lu_obj_LB = lu(LB2D_sparse)
+        # dummy arrays for elliptic solvers
+        S_dummy = allocate_float(vpa.n,vperp.n)
+        Q_dummy = allocate_float(vpa.n,vperp.n)
+        rhsvpavperp = allocate_float(vpa.n,vperp.n)
+
+        return new(MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
+                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
+                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
+                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
+                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
+                    S_dummy, Q_dummy, rhsvpavperp)
+    end
+end
+
+struct fokkerplanck_rosenbluth_potential_data
+    # boundary weights (Green's function) data
+    bwgt::fokkerplanck_boundary_integration_struct
+    # dummy arrays for boundary data calculation
+    rpbd::rosenbluth_potential_boundary_data
+    # option for boundary data calculation
+    boundary_data_option::boundary_data_type
+    # assembled 2D weak-form matrices
+    matrix_operators::assembled_matrix_operators_sparse
+    function fokkerplanck_rosenbluth_potential_data(vpa::finite_element_coordinate,
+                                                    vperp::finite_element_coordinate,
+                                                    YY_arrays::YY_collision_operator_arrays,
+                                                    boundary_data_option::boundary_data_type;
+                                                    print_to_screen=true)
+        bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
+        if vperp.n > 1 && boundary_data_option == direct_integration
+            init_Rosenbluth_potential_boundary_integration_weights!(bwgt.G0_weights, bwgt.G1_weights, bwgt.H0_weights, bwgt.H1_weights,
+                                            bwgt.H2_weights, bwgt.H3_weights, vpa, vperp, print_to_screen=print_to_screen)
+        end
+        rpbd = rosenbluth_potential_boundary_data(vpa,vperp)
+        matrix_operators = assembled_matrix_operators_sparse(vpa,vperp,YY_arrays,print_to_screen=print_to_screen)
+        return new(bwgt, rpbd, boundary_data_option, matrix_operators)
+    end
+end
+
 """
 Immutable information about each species
 """
@@ -490,37 +752,10 @@ struct fokkerplanck_weakform_arrays_struct
     vperp::finite_element_coordinate
     # species information
     species::species_info
-    # boundary weights (Green's function) data
-    bwgt::fokkerplanck_boundary_integration_struct
-    # dummy arrays for boundary data calculation
-    rpbd::rosenbluth_potential_boundary_data
-    # option for boundary data calculation
-    boundary_data_option::boundary_data_type
-    # assembled 2D weak-form matrices
-    MM2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKpar2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKperp2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LP2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LV2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LB2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PPparPUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PPpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    MMparMNperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KPperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    # lu decomposition objects
-    lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LP::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LV::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LB::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    # data for Rosenbluth potential elliptic solver
+    fprp_data::fokkerplanck_rosenbluth_potential_data
     # elemental matrices for the assembly of C[Fs,Fsp]
     YY_arrays::YY_collision_operator_arrays
-    # dummy arrays for elliptic solvers
-    S_dummy::Array{mk_float,2}
-    Q_dummy::Array{mk_float,2}
-    rhsvpavperp::Array{mk_float,2}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
     GGs::Array{mk_float,3}
     HHs::Array{mk_float,3}
@@ -567,33 +802,10 @@ struct fokkerplanck_weakform_arrays_struct
                                                 species::species_info,
                                                 boundary_data_option::boundary_data_type;
                                                 print_to_screen=true::Bool)
-        bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
-        if vperp.n > 1 && boundary_data_option == direct_integration
-            init_Rosenbluth_potential_boundary_integration_weights!(bwgt.G0_weights, bwgt.G1_weights, bwgt.H0_weights, bwgt.H1_weights,
-                                            bwgt.H2_weights, bwgt.H3_weights, vpa, vperp, print_to_screen=print_to_screen)
-        end
-        rpbd = rosenbluth_potential_boundary_data(vpa,vperp)
         YY_arrays = YY_collision_operator_arrays(vpa,vperp)
-        if print_to_screen
-            println("finished YY array calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        end
-        MM2D_sparse, KKpar2D_sparse, KKperp2D_sparse,
-        KKpar2D_with_BC_terms_sparse, KKperp2D_with_BC_terms_sparse,
-        LP2D_sparse, LV2D_sparse, LB2D_sparse, KPperp2D_sparse,
-        PUperp2D_sparse, PPparPUperp2D_sparse, PPpar2D_sparse,
-        MMparMNperp2D_sparse = assemble_matrix_operators_dirichlet_bc_sparse(vpa,vperp,YY_arrays,print_to_screen=print_to_screen)
-        lu_obj_MM = lu(MM2D_sparse)
-        lu_obj_LP = lu(LP2D_sparse)
-        lu_obj_LV = lu(LV2D_sparse)
-        lu_obj_LB = lu(LB2D_sparse)
-        if print_to_screen
-            println("finished LU decomposition initialisation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        end
-
+        fprp_data = fokkerplanck_rosenbluth_potential_data(vpa,vperp,
+                                YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
-        S_dummy = allocate_float(nvpa,nvperp)
-        Q_dummy = allocate_float(nvpa,nvperp)
-        rhsvpavperp = allocate_float(nvpa,nvperp)
 
         GG = allocate_float(nvpa,nvperp)
         HH = allocate_float(nvpa,nvperp)
@@ -628,13 +840,7 @@ struct fokkerplanck_weakform_arrays_struct
         delta_E = allocate_float(nspecies)
         correction_coeffs_z = allocate_float(3,nspecies,nspecies)
         delta_pdf = allocate_float(nvpa,nvperp,nspecies)
-        return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
-                    MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
-                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
-                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
-                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
-                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
-                    YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
+        return new(vpa, vperp, species, fprp_data, YY_arrays,
                     GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
                     GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
@@ -2352,213 +2558,6 @@ function enforce_dirichlet_bc!(fvpavperp::AbstractArray{mk_float,2},
     return nothing
 end
 
-"""
-Function to contruct the global sparse matrices used to solve
-the elliptic PDEs for the Rosenbluth potentials. Uses a sparse matrix
-construction method. The matrices are 2D in the compound index `ic`
-which indexes the velocity space labelled by `ivpa,ivperp`.
-Dirichlet boundary conditions are imposed in the appropriate stiffness
-matrices by setting the boundary row to be the Kronecker delta
-(0 except where `ivpa = ivpap` and `ivperp = ivperpp`).
-See also `assemble_matrix_operators_dirichlet_bc()`.
-"""
-function assemble_matrix_operators_dirichlet_bc_sparse(vpa::finite_element_coordinate,
-                                                vperp::finite_element_coordinate,
-                                                YY_arrays::YY_collision_operator_arrays;
-                                                print_to_screen=true)
-    # Assemble a 2D mass matrix in the global compound coordinate
-    nc_global = vpa.n*vperp.n
-    ntot_vpa = (vpa.nelement - 1)*(vpa.ngrid^2 - 1) + vpa.ngrid^2
-    ntot_vperp = (vperp.nelement - 1)*(vperp.ngrid^2 - 1) + vperp.ngrid^2
-    nsparse = ntot_vpa*ntot_vperp
-
-    MM2D = sparse_matrix_constructor(nsparse)
-    KKpar2D = sparse_matrix_constructor(nsparse)
-    KKperp2D = sparse_matrix_constructor(nsparse)
-    KKpar2D_with_BC_terms = sparse_matrix_constructor(nsparse)
-    KKperp2D_with_BC_terms = sparse_matrix_constructor(nsparse)
-    PUperp2D = sparse_matrix_constructor(nsparse)
-    PPparPUperp2D = sparse_matrix_constructor(nsparse)
-    PPpar2D = sparse_matrix_constructor(nsparse)
-    MMparMNperp2D = sparse_matrix_constructor(nsparse)
-    KPperp2D = sparse_matrix_constructor(nsparse)
-    # Laplacian matrix
-    LP2D = sparse_matrix_constructor(nsparse)
-    # Modified Laplacian matrix (for d / d vperp potentials)
-    LV2D = sparse_matrix_constructor(nsparse)
-    # Modified Laplacian matrix (for d^2 / d vperp^2 potentials)
-    LB2D = sparse_matrix_constructor(nsparse)
-
-    impose_BC_at_zero_vperp = false
-    if print_to_screen
-        println("begin elliptic operator assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
-    end
-    for ielement_vperp in 1:vperp.nelement
-        @views MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
-        @views MRperp = YY_arrays.MRperp[:,:,ielement_vperp]
-        @views MNperp = YY_arrays.MNperp[:,:,ielement_vperp]
-        @views KKperp = YY_arrays.KKperp[:,:,ielement_vperp]
-        @views KJperp = YY_arrays.KJperp[:,:,ielement_vperp]
-        @views PPperp = YY_arrays.PPperp[:,:,ielement_vperp]
-        @views PUperp = YY_arrays.PUperp[:,:,ielement_vperp]
-        @views KKperp_with_BC_terms = YY_arrays.KKperp_with_BC_terms[:,:,ielement_vperp]
-        for ielement_vpa in 1:vpa.nelement
-            @views MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
-            @views KKpar = YY_arrays.KKpar[:,:,ielement_vpa]
-            @views KKpar_with_BC_terms = YY_arrays.KKpar_with_BC_terms[:,:,ielement_vpa]
-            @views PPpar = YY_arrays.PPpar[:,:,ielement_vpa]
-            for ivperpp_local in 1:vperp.ngrid
-                for ivperp_local in 1:vperp.ngrid
-                    for ivpap_local in 1:vpa.ngrid
-                        for ivpa_local in 1:vpa.ngrid
-                            ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
-                            icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpap_local,ivperpp_local) #get_indices(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivpap_local,ivperp_local,ivperpp_local)
-                            icsc = icsc_func(ivpa_local,ivpap_local,ielement_vpa,
-                                           vpa.ngrid,vpa.nelement,
-                                           ivperp_local,ivperpp_local,
-                                           ielement_vperp,
-                                           vperp.ngrid,vperp.nelement)
-                            #println("ielement_vpa: ",ielement_vpa," ielement_vperp: ",ielement_vperp)
-                            #println("ivpa_local: ",ivpa_local," ivpap_local: ",ivpap_local)
-                            #println("ivperp_local: ",ivperp_local," ivperpp_local: ",ivperpp_local)
-                            #println("ic: ",ic_global," icp: ",icp_global)
-                            # boundary condition possibilities
-                            lower_boundary_row_vpa = (ielement_vpa == 1 && ivpa_local == 1)
-                            upper_boundary_row_vpa = (ielement_vpa == vpa.nelement && ivpa_local == vpa.ngrid)
-                            lower_boundary_row_vperp = (ielement_vperp == 1 && ivperp_local == 1)
-                            upper_boundary_row_vperp = (ielement_vperp == vperp.nelement && ivperp_local == vperp.ngrid)
-
-
-                            if lower_boundary_row_vpa
-                                if ivpap_local == 1 && ivperp_local == ivperpp_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif upper_boundary_row_vpa
-                                if ivpap_local == vpa.ngrid && ivperp_local == ivperpp_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif lower_boundary_row_vperp && impose_BC_at_zero_vperp
-                                if ivperpp_local == 1 && ivpa_local == ivpap_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif upper_boundary_row_vperp
-                                if ivperpp_local == vperp.ngrid && ivpa_local == ivpap_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            else
-                                # assign Laplacian matrix data
-                                assemble_constructor_data!(LP2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                             KKperp[ivperp_local,ivperpp_local]))
-                                assemble_constructor_data!(LV2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MRperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                            (KJperp[ivperp_local,ivperpp_local] -
-                                             PPperp[ivperp_local,ivperpp_local] -
-                                             MNperp[ivperp_local,ivperpp_local])))
-                                assemble_constructor_data!(LB2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MRperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                             (KJperp[ivperp_local,ivperpp_local] -
-                                              PPperp[ivperp_local,ivperpp_local] -
-                                          4.0*MNperp[ivperp_local,ivperpp_local])))
-                            end
-                            #assign mass matrix
-                            assemble_constructor_data!(MM2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-
-                            # assign K matrices (no explicit boundary terms)
-                            assemble_constructor_data!(KKpar2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KKperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             KKperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KPperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             (KJperp[ivperp_local,ivperpp_local] -
-                                              2.0*PPperp[ivperp_local,ivperpp_local] -
-                                              2.0*MNperp[ivperp_local,ivperpp_local])))
-
-                            # assign K matrices (with explicit boundary terms from integration by parts)
-                            assemble_constructor_data!(KKpar2D_with_BC_terms,icsc,ic_global,icp_global,
-                                            (KKpar_with_BC_terms[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KKperp2D_with_BC_terms,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             KKperp_with_BC_terms[ivperp_local,ivperpp_local]))
-                            # assign PU matrix
-                            assemble_constructor_data!(PUperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             PUperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(PPparPUperp2D,icsc,ic_global,icp_global,
-                                            (PPpar[ivpa_local,ivpap_local]*
-                                             PUperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(PPpar2D,icsc,ic_global,icp_global,
-                                            (PPpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            # assign RHS mass matrix for d2Gdvperp2
-                            assemble_constructor_data!(MMparMNperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             MNperp[ivperp_local,ivperpp_local]))
-                        end
-                    end
-                end
-            end
-        end
-    end
-    MM2D_sparse = create_sparse_matrix(MM2D)
-    KKpar2D_sparse = create_sparse_matrix(KKpar2D)
-    KKperp2D_sparse = create_sparse_matrix(KKperp2D)
-    KKpar2D_with_BC_terms_sparse = create_sparse_matrix(KKpar2D_with_BC_terms)
-    KKperp2D_with_BC_terms_sparse = create_sparse_matrix(KKperp2D_with_BC_terms)
-    LP2D_sparse = create_sparse_matrix(LP2D)
-    LV2D_sparse = create_sparse_matrix(LV2D)
-    LB2D_sparse = create_sparse_matrix(LB2D)
-    KPperp2D_sparse = create_sparse_matrix(KPperp2D)
-    PUperp2D_sparse = create_sparse_matrix(PUperp2D)
-    PPparPUperp2D_sparse = create_sparse_matrix(PPparPUperp2D)
-    PPpar2D_sparse = create_sparse_matrix(PPpar2D)
-    MMparMNperp2D_sparse = create_sparse_matrix(MMparMNperp2D)
-    if print_to_screen
-        println("finished elliptic operator constructor assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
-    end
-    return MM2D_sparse, KKpar2D_sparse, KKperp2D_sparse,
-           KKpar2D_with_BC_terms_sparse, KKperp2D_with_BC_terms_sparse,
-           LP2D_sparse, LV2D_sparse, LB2D_sparse,
-           KPperp2D_sparse, PUperp2D_sparse, PPparPUperp2D_sparse,
-           PPpar2D_sparse, MMparMNperp2D_sparse
-end
-
 function allocate_preconditioner_matrix(vpa::finite_element_coordinate,
                                     vperp::finite_element_coordinate)
     # Assemble a 2D mass matrix in the global compound coordinate
@@ -2627,7 +2626,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
              d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,
-             vpa,vperp,fp_operator,msp,
+             vpa,vperp,fp_operator.fprp_data,msp,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
@@ -2681,7 +2680,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
                 GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
                 d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fp_operator,species.mass[is],
+                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_data,species.mass[is],
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -2877,10 +2876,10 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     # values in CC2D_sparse, in the event BCs are used
     enforce_vpavperp_BCs!(pdf,vpa,vperp)
     # extra dummy arrays
-    pdf_scratch = fkpl_arrays.rhsvpavperp
-    pdf_dummy = fkpl_arrays.S_dummy
+    pdf_scratch = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
+    pdf_dummy = fkpl_arrays.fprp_data.matrix_operators.S_dummy
     # mass matrix for RHS
-    MM2D_sparse = fkpl_arrays.MM2D_sparse
+    MM2D_sparse = fkpl_arrays.fprp_data.matrix_operators.MM2D_sparse
     @views @. pdf_scratch = pdf
     pdf_c = vec(pdf)
     pdf_scratch_c = vec(pdf_scratch)
@@ -3110,32 +3109,33 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
              HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,dGdvperp::Tpdf,
              d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-             fkpl_arrays::fokkerplanck_weakform_arrays_struct, mass::mk_float;
+             fkpl_arrays::fokkerplanck_rosenbluth_potential_data, mass::mk_float;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false) where Tpdf <: AbstractArray{mk_float,2}
 
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    MM2D_sparse = fkpl_arrays.MM2D_sparse
-    KKpar2D_sparse = fkpl_arrays.KKpar2D_sparse
-    KKperp2D_sparse = fkpl_arrays.KKperp2D_sparse
-    LP2D_sparse = fkpl_arrays.LP2D_sparse
-    LV2D_sparse = fkpl_arrays.LV2D_sparse
-    PUperp2D_sparse = fkpl_arrays.PUperp2D_sparse
-    PPparPUperp2D_sparse = fkpl_arrays.PPparPUperp2D_sparse
-    PPpar2D_sparse = fkpl_arrays.PPpar2D_sparse
-    MMparMNperp2D_sparse = fkpl_arrays.MMparMNperp2D_sparse
-    KPperp2D_sparse = fkpl_arrays.KPperp2D_sparse
-    lu_obj_MM = fkpl_arrays.lu_obj_MM
-    lu_obj_LP = fkpl_arrays.lu_obj_LP
-    lu_obj_LV = fkpl_arrays.lu_obj_LV
-    lu_obj_LB = fkpl_arrays.lu_obj_LB
+    matrix_operators = fkpl_arrays.matrix_operators
+    MM2D_sparse = matrix_operators.MM2D_sparse
+    KKpar2D_sparse = matrix_operators.KKpar2D_sparse
+    KKperp2D_sparse = matrix_operators.KKperp2D_sparse
+    LP2D_sparse = matrix_operators.LP2D_sparse
+    LV2D_sparse = matrix_operators.LV2D_sparse
+    PUperp2D_sparse = matrix_operators.PUperp2D_sparse
+    PPparPUperp2D_sparse = matrix_operators.PPparPUperp2D_sparse
+    PPpar2D_sparse = matrix_operators.PPpar2D_sparse
+    MMparMNperp2D_sparse = matrix_operators.MMparMNperp2D_sparse
+    KPperp2D_sparse = matrix_operators.KPperp2D_sparse
+    lu_obj_MM = matrix_operators.lu_obj_MM
+    lu_obj_LP = matrix_operators.lu_obj_LP
+    lu_obj_LV = matrix_operators.lu_obj_LV
+    lu_obj_LB = matrix_operators.lu_obj_LB
 
     bwgt = fkpl_arrays.bwgt
     rpbd = fkpl_arrays.rpbd
 
-    S_dummy = fkpl_arrays.S_dummy
-    Q_dummy = fkpl_arrays.Q_dummy
-    rhsvpavperp = fkpl_arrays.rhsvpavperp
+    S_dummy = matrix_operators.S_dummy
+    Q_dummy = matrix_operators.Q_dummy
+    rhsvpavperp = matrix_operators.rhsvpavperp
     boundary_data_option = fkpl_arrays.boundary_data_option
     # calculate the boundary data
     if boundary_data_option == multipole_expansion
