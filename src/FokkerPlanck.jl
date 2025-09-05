@@ -114,34 +114,21 @@ function fokker_planck_collision_operator_weak_form!(
     @boundscheck vperp.n == size(ffs_in,2) || throw(BoundsError(ffs_in))
 
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    rhsvpavperp = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
-    lu_obj_MM = fkpl_arrays.fprp_data.matrix_operators.lu_obj_MM
+    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
     YY_arrays = fkpl_arrays.YY_arrays
-
-    GG = fkpl_arrays.GG
-    HH = fkpl_arrays.HH
-    dHdvpa = fkpl_arrays.dHdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dGdvperp = fkpl_arrays.dGdvperp
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-
+    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     if use_Maxwellian_Rosenbluth_coefficients
-        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG,HH,dHdvpa,dHdvperp,
-                 d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,ffsp_in,vpa,vperp,msp)
+        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,ffsp_in,vpa,vperp,msp)
     else
-        calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
-             d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,ffsp_in,
-             vpa,vperp,fkpl_arrays.fprp_data,msp,
+        calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,ffsp_in,
+             vpa,vperp,fkpl_arrays.fprp_solver_data,msp,
              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
              calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     end
     # assemble the RHS of the collision operator matrix eq
     assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
-          d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,
-          dHdvpa,dHdvperp,ms,msp,nussp,
-          vpa,vperp,YY_arrays)
+            rosenbluth_potentials,ms,msp,nussp,vpa,vperp,YY_arrays)
     # solve the collision operator matrix eq
     # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
     # the 'matrix solve' functionality of ldiv!() from the LinearAlgebra package
@@ -169,42 +156,21 @@ function fokker_planck_collision_operator_weak_form!(
     @boundscheck species.n == size(ff_in,3) || throw(BoundsError(ff_in))
 
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    rhsvpavperp = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
-    lu_obj_MM = fkpl_arrays.fprp_data.matrix_operators.lu_obj_MM
+    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
     YY_arrays = fkpl_arrays.YY_arrays
-
-    #CCs = fkpl_arrays.CCs
-    # dummy arrays for summed Rosenbluth potentials
-    dHdvpa_sum = fkpl_arrays.dHdvpa
-    dHdvperp_sum = fkpl_arrays.dHdvperp
-    d2Gdvperp2_sum = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2_sum = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa_sum = fkpl_arrays.d2Gdvperpdvpa
-    # dummy arrays for Rosenbluth potentials by species
-    GGs = fkpl_arrays.GGs
-    HHs = fkpl_arrays.HHs
-    dHsdvpa = fkpl_arrays.dHsdvpa
-    dHsdvperp = fkpl_arrays.dHsdvperp
-    dGsdvperp = fkpl_arrays.dGsdvperp
-    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
-    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
-    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
+    rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
+    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     # for each species, get the Rosenbluth potential due to that species
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
-            @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GGs[:,:,is],HHs[:,:,is],
-                    dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                    d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],
-                    d2Gdvperpdvpa[:,:,is],d2Gsdvperp2[:,:,is],
+            @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials_s[is],
                     ff_in[:,:,is],vpa,vperp,species.mass[is])
         end
     else
         for is in 1:species.n
-            @views calculate_rosenbluth_potentials_via_elliptic_solve!(GGs[:,:,is],HHs[:,:,is],
-                    dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                    d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],
-                    d2Gsdvperpdvpa[:,:,is],d2Gsdvperp2[:,:,is],ff_in[:,:,is],
-                    vpa,vperp,fkpl_arrays.fprp_data,species.mass[is],
+            @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],ff_in[:,:,is],
+                    vpa,vperp,fkpl_arrays.fprp_solver_data,species.mass[is],
                     algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end
@@ -212,14 +178,11 @@ function fokker_planck_collision_operator_weak_form!(
     # for each species, sum up the Rosenbluth potentials to make the appropriate
     # total Rosenbluth potential, and assemble the collision operator
     for is in 1:species.n
-        calculate_cross_species_rosenbluth_potential_sums!(
-                d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
-                species,is)
+        calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
+                rosenbluth_potentials_s,species,is)
         # assemble the RHS of the collision operator matrix eq
         @views assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ff_in[:,:,is],
-                d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,
-                dHdvpa_sum,dHdvperp_sum,1.0,1.0,nuref,
+                rosenbluth_potentials,1.0,1.0,nuref,
                 vpa,vperp,YY_arrays)
         # solve the collision operator matrix eq
         # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
@@ -284,18 +247,15 @@ function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(CC::Abstract
     @boundscheck vperp.n == size(ffs_in,2) || throw(BoundsError(ffs_in))
 
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    rhsvpavperp = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
-    lu_obj_MM = fkpl_arrays.fprp_data.matrix_operators.lu_obj_MM
+    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
     YY_arrays = fkpl_arrays.YY_arrays
-
-    GG = fkpl_arrays.GG
-    HH = fkpl_arrays.HH
-    dHdvpa = fkpl_arrays.dHdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dGdvperp = fkpl_arrays.dGdvperp
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
+    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
 
     # number of primed species
     nsp = size(msp,1)
@@ -338,8 +298,7 @@ function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(CC::Abstract
     # ivperp, ivpa indices in assemble_explicit_collision_operator_rhs_parallel!()
     # assemble the RHS of the collision operator matrix eq
     assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
-      d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,
-      dHdvpa,dHdvperp,1.0,1.0,nuref,
+      rosenbluth_potentials,1.0,1.0,nuref,
       vpa,vperp,YY_arrays)
 
     # solve the collision operator matrix eq
@@ -361,7 +320,7 @@ function calculate_entropy_production(CC::AbstractArray{mk_float,2},
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # assign dummy array
-    lnfC = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
+    lnfC = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -380,7 +339,7 @@ function calculate_entropy_production(
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     # assign dummy array
-    lnfC = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
+    lnfC = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
     dSdt = 0.0
     @inbounds begin
         # compute entropy production for each species,
@@ -481,7 +440,7 @@ function fokker_planck_self_collisions_backward_euler_step!(Fold::AbstractArray{
         enforce_vpavperp_BCs!(Fnew,vpa,vperp)
         if use_conserving_corrections
             # ad-hoc end-of-step corrections, again introducing only ~atol error
-            deltaF = fkpl_arrays.fp_operator.fprp_data.matrix_operators.rhsvpavperp
+            deltaF = fkpl_arrays.fp_operator.fprp_solver_data.matrix_operators.rhsvpavperp
             @inbounds begin
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n

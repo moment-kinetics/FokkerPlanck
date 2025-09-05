@@ -688,7 +688,31 @@ struct assembled_matrix_operators_sparse
     end
 end
 
-struct fokkerplanck_rosenbluth_potential_data
+struct rosenbluth_potential_data
+    # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
+    GG::Array{mk_float,2}
+    HH::Array{mk_float,2}
+    dHdvpa::Array{mk_float,2}
+    dHdvperp::Array{mk_float,2}
+    dGdvperp::Array{mk_float,2}
+    d2Gdvperp2::Array{mk_float,2}
+    d2Gdvpa2::Array{mk_float,2}
+    d2Gdvperpdvpa::Array{mk_float,2}
+    function rosenbluth_potential_data(vpa::finite_element_coordinate,
+                                vperp::finite_element_coordinate)
+        GG = allocate_float(vpa.n,vperp.n)
+        HH = allocate_float(vpa.n,vperp.n)
+        dHdvpa = allocate_float(vpa.n,vperp.n)
+        dHdvperp = allocate_float(vpa.n,vperp.n)
+        dGdvperp = allocate_float(vpa.n,vperp.n)
+        d2Gdvperp2 = allocate_float(vpa.n,vperp.n)
+        d2Gdvpa2 = allocate_float(vpa.n,vperp.n)
+        d2Gdvperpdvpa = allocate_float(vpa.n,vperp.n)
+        return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa)
+    end
+end
+
+struct fokkerplanck_rosenbluth_potential_solver_data
     # boundary weights (Green's function) data
     bwgt::fokkerplanck_boundary_integration_struct
     # dummy arrays for boundary data calculation
@@ -697,7 +721,7 @@ struct fokkerplanck_rosenbluth_potential_data
     boundary_data_option::boundary_data_type
     # assembled 2D weak-form matrices
     matrix_operators::assembled_matrix_operators_sparse
-    function fokkerplanck_rosenbluth_potential_data(vpa::finite_element_coordinate,
+    function fokkerplanck_rosenbluth_potential_solver_data(vpa::finite_element_coordinate,
                                                     vperp::finite_element_coordinate,
                                                     YY_arrays::YY_collision_operator_arrays,
                                                     boundary_data_option::boundary_data_type;
@@ -753,27 +777,13 @@ struct fokkerplanck_weakform_arrays_struct
     # species information
     species::species_info
     # data for Rosenbluth potential elliptic solver
-    fprp_data::fokkerplanck_rosenbluth_potential_data
+    fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data
     # elemental matrices for the assembly of C[Fs,Fsp]
     YY_arrays::YY_collision_operator_arrays
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
-    GGs::Array{mk_float,3}
-    HHs::Array{mk_float,3}
-    dHsdvpa::Array{mk_float,3}
-    dHsdvperp::Array{mk_float,3}
-    dGsdvperp::Array{mk_float,3}
-    d2Gsdvperp2::Array{mk_float,3}
-    d2Gsdvpa2::Array{mk_float,3}
-    d2Gsdvperpdvpa::Array{mk_float,3}
+    rosenbluth_potentials_s::Vector{rosenbluth_potential_data}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
-    GG::Array{mk_float,2}
-    HH::Array{mk_float,2}
-    dHdvpa::Array{mk_float,2}
-    dHdvperp::Array{mk_float,2}
-    dGdvperp::Array{mk_float,2}
-    d2Gdvperp2::Array{mk_float,2}
-    d2Gdvpa2::Array{mk_float,2}
-    d2Gdvperpdvpa::Array{mk_float,2}
+    rosenbluth_potentials::rosenbluth_potential_data
     # collision operator moment arrays
     delta_n_sp_s::Array{mk_float,2}
     delta_m_sp_s::Array{mk_float,2}
@@ -803,27 +813,14 @@ struct fokkerplanck_weakform_arrays_struct
                                                 boundary_data_option::boundary_data_type;
                                                 print_to_screen=true::Bool)
         YY_arrays = YY_collision_operator_arrays(vpa,vperp)
-        fprp_data = fokkerplanck_rosenbluth_potential_data(vpa,vperp,
+        fprp_solver_data = fokkerplanck_rosenbluth_potential_solver_data(vpa,vperp,
                                 YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
-
-        GG = allocate_float(nvpa,nvperp)
-        HH = allocate_float(nvpa,nvperp)
-        dHdvpa = allocate_float(nvpa,nvperp)
-        dHdvperp = allocate_float(nvpa,nvperp)
-        dGdvperp = allocate_float(nvpa,nvperp)
-        d2Gdvperp2 = allocate_float(nvpa,nvperp)
-        d2Gdvpa2 = allocate_float(nvpa,nvperp)
-        d2Gdvperpdvpa = allocate_float(nvpa,nvperp)
-
-        GGs = allocate_float(nvpa,nvperp,nspecies)
-        HHs = allocate_float(nvpa,nvperp,nspecies)
-        dHsdvpa = allocate_float(nvpa,nvperp,nspecies)
-        dHsdvperp = allocate_float(nvpa,nvperp,nspecies)
-        dGsdvperp = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvperp2 = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
+        rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,nspecies)
+        for is in 1:nspecies
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+        end
+        rosenbluth_potentials = rosenbluth_potential_data(vpa,vperp)
 
         # multi-species conserving corrections
         delta_n_sp_s = allocate_float(nspecies,nspecies)
@@ -840,9 +837,8 @@ struct fokkerplanck_weakform_arrays_struct
         delta_E = allocate_float(nspecies)
         correction_coeffs_z = allocate_float(3,nspecies,nspecies)
         delta_pdf = allocate_float(nvpa,nvperp,nspecies)
-        return new(vpa, vperp, species, fprp_data, YY_arrays,
-                    GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
-                    GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
+        return new(vpa, vperp, species, fprp_solver_data, YY_arrays,
+                    rosenbluth_potentials_s, rosenbluth_potentials,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
                     density, upar, pressure, ppar, qpar, rmom,
                     delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf)
@@ -2610,29 +2606,19 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     vpa = fp_operator.vpa
     vperp = fp_operator.vperp
     YY_arrays = fp_operator.YY_arrays
-    GG = fp_operator.GG
-    HH = fp_operator.HH
-    dHdvpa = fp_operator.dHdvpa
-    dHdvperp = fp_operator.dHdvperp
-    dGdvperp = fp_operator.dGdvperp
-    d2Gdvperp2 = fp_operator.d2Gdvperp2
-    d2Gdvpa2 = fp_operator.d2Gdvpa2
-    d2Gdvperpdvpa = fp_operator.d2Gdvperpdvpa
+    rosenbluth_potentials = fp_operator.rosenbluth_potentials
 
     # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
     if use_Maxwellian_Rosenbluth_coefficients
-        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG,HH,dHdvpa,dHdvperp,
-                 d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,vpa,vperp,msp)
+        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,pdf,vpa,vperp,msp)
     else
-        calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
-             d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,
-             vpa,vperp,fp_operator.fprp_data,msp,
+        calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,pdf,
+             vpa,vperp,fp_operator.fprp_solver_data,msp,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
     assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
-            d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-            delta_t,nussp,fp_operator)
+            rosenbluth_potentials,delta_t,nussp,fp_operator)
     # should improve on this step to avoid recreating the sparse array if possible.
     fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
     lu!(fkpl_arrays.lu_obj_CC2D, fkpl_arrays.CC2D_sparse)
@@ -2651,36 +2637,18 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     vperp = fp_operator.vperp
     species = fp_operator.species
     YY_arrays = fp_operator.YY_arrays
-    # dummy arrays for summed Rosenbluth potentials
-    dHdvpa_sum = fp_operator.dHdvpa
-    dHdvperp_sum = fp_operator.dHdvperp
-    d2Gdvperp2_sum = fp_operator.d2Gdvperp2
-    d2Gdvpa2_sum = fp_operator.d2Gdvpa2
-    d2Gdvperpdvpa_sum = fp_operator.d2Gdvperpdvpa
-    # dummy arrays for Rosenbluth potentials by species
-    GGs = fp_operator.GGs
-    HHs = fp_operator.HHs
-    dHsdvpa = fp_operator.dHsdvpa
-    dHsdvperp = fp_operator.dHsdvperp
-    dGsdvperp = fp_operator.dGsdvperp
-    d2Gsdvperp2 = fp_operator.d2Gsdvperp2
-    d2Gsdvpa2 = fp_operator.d2Gsdvpa2
-    d2Gsdvperpdvpa = fp_operator.d2Gsdvperpdvpa
-
-    # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
+    # dummy arrays for Rosenbluth potentials
+    rosenbluth_potentials_s = fp_operator.rosenbluth_potentials_s
+    rosenbluth_potentials = fp_operator.rosenbluth_potentials
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
-                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,species.mass[is])
+                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,species.mass[is])
         end
     else
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
-                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_data,species.mass[is],
+                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_solver_data,species.mass[is],
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -2690,12 +2658,10 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
         # total Rosenbluth potential, and assemble the preconditioner
         for is in 1:species.n
             calculate_cross_species_rosenbluth_potential_sums!(
-                    d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                    d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                    rosenbluth_potentials,rosenbluth_potentials_s,
                     species,is)
             assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
-                d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                delta_t,nuref,fp_operator)
+                rosenbluth_potentials,delta_t,nuref,fp_operator)
             # should improve on this step to avoid recreating the sparse array if possible.
             fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
             lu!(fkpl_arrays.lu_objs_CC2D[is], fkpl_arrays.CC2D_sparse)
@@ -2704,9 +2670,8 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     return nothing
 end
 function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor::sparse_matrix_constructor,
-    d2Gdvpa2::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,
-    delta_t::mk_float,nuref::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct) where Tpdf <:AbstractArray{mk_float,2}
+    rosenbluth_potentials::rosenbluth_potential_data,delta_t::mk_float,nuref::mk_float,
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     # extract structs from fkpl_arrays
     # we do not extract the potentials from fkpl_arrays to permit flexibility
     # but pass this information by argument
@@ -2714,6 +2679,11 @@ function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     YY_arrays = fkpl_arrays.YY_arrays
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
     @inbounds begin
         # set the values of the matrix to zero before assembly
         CC2D_sparse_constructor.SS .= 0.0
@@ -2876,10 +2846,10 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     # values in CC2D_sparse, in the event BCs are used
     enforce_vpavperp_BCs!(pdf,vpa,vperp)
     # extra dummy arrays
-    pdf_scratch = fkpl_arrays.fprp_data.matrix_operators.rhsvpavperp
-    pdf_dummy = fkpl_arrays.fprp_data.matrix_operators.S_dummy
+    pdf_scratch = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    pdf_dummy = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
     # mass matrix for RHS
-    MM2D_sparse = fkpl_arrays.fprp_data.matrix_operators.MM2D_sparse
+    MM2D_sparse = fkpl_arrays.fprp_solver_data.matrix_operators.MM2D_sparse
     @views @. pdf_scratch = pdf
     pdf_c = vec(pdf)
     pdf_scratch_c = vec(pdf_scratch)
@@ -2909,11 +2879,15 @@ in weak form. Once the array `rhsvpavperp` contains the assembled weak-form coll
 a mass matrix solve still must be carried out to find the time derivative of the distribution function
 due to collisions.
 """
-function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::Tpdf,pdfs::AbstractArray{mk_float,2},
-    d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,d2Gspdvperp2::Tpdf,
-    dHspdvpa::Tpdf,dHspdvperp::Tpdf,ms::mk_float,msp::mk_float,nussp::mk_float,
+function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::AbstractArray{mk_float,2},pdfs::AbstractArray{mk_float,2},
+    rosenbluth_potentials_sp::rosenbluth_potential_data,ms::mk_float,msp::mk_float,nussp::mk_float,
     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-    YY_arrays::YY_collision_operator_arrays) where Tpdf <: AbstractArray{mk_float,2}
+    YY_arrays::YY_collision_operator_arrays)
+    d2Gspdvpa2 = rosenbluth_potentials_sp.d2Gdvpa2
+    d2Gspdvperpdvpa = rosenbluth_potentials_sp.d2Gdvperpdvpa
+    d2Gspdvperp2 = rosenbluth_potentials_sp.d2Gdvperp2
+    dHspdvpa = rosenbluth_potentials_sp.dHdvpa
+    dHspdvperp = rosenbluth_potentials_sp.dHdvperp
     @inbounds begin
         # assemble RHS of collision operator
         rhsc = vec(rhsvpavperp)
@@ -3105,14 +3079,20 @@ accurate Dirichlet boundary condition on the maximum `vpa` and `vperp`
 of the domain. We use the sparse LU decomposition from the LinearAlgebra package
 to solve the PDE matrix equations.
 """
-function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
-             HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,dGdvperp::Tpdf,
-             d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::AbstractArray{mk_float,2},
+function calculate_rosenbluth_potentials_via_elliptic_solve!(
+             rosenbluth_potentials::rosenbluth_potential_data,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-             fkpl_arrays::fokkerplanck_rosenbluth_potential_data, mass::mk_float;
+             fkpl_arrays::fokkerplanck_rosenbluth_potential_solver_data, mass::mk_float;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
-             calculate_dGdvperp=false) where Tpdf <: AbstractArray{mk_float,2}
-
+             calculate_dGdvperp=false)
+    GG = rosenbluth_potentials.GG
+    HH = rosenbluth_potentials.HH
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dGdvperp = rosenbluth_potentials.dGdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
     matrix_operators = fkpl_arrays.matrix_operators
     MM2D_sparse = matrix_operators.MM2D_sparse
@@ -3264,12 +3244,18 @@ end
 Function to calculate Rosenbluth potentials for shifted Maxwellians
 using an analytical specification
 """
-function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG::Tpdf,
-    HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,
-    dGdvperp::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,
+function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+    rosenbluth_potentials::rosenbluth_potential_data,
     ffsp_in::AbstractArray{mk_float,2},vpa::finite_element_coordinate,
-    vperp::finite_element_coordinate,mass::mk_float) where Tpdf <: AbstractArray{mk_float,2}
-
+    vperp::finite_element_coordinate,mass::mk_float)
+    GG = rosenbluth_potentials.GG
+    HH = rosenbluth_potentials.HH
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dGdvperp = rosenbluth_potentials.dGdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     dens = get_density(ffsp_in, vpa, vperp)
     upar = get_upar(ffsp_in, vpa, vperp, dens)
     pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
@@ -3277,6 +3263,7 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG::Tpdf,
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
+                GG[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 HH[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 d2Gdvpa2[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 d2Gdvperp2[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
@@ -3367,9 +3354,14 @@ end
 """
 """
 function calculate_cross_species_rosenbluth_potential_sums!(
-                d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-                d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Vector{rosenbluth_potential_data},
                 species,is::mk_int)
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     mass = species.mass
     zeds = species.zeds
     d2Gdvpa2 .= 0.0
@@ -3377,15 +3369,18 @@ function calculate_cross_species_rosenbluth_potential_sums!(
     d2Gdvperp2 .= 0.0
     dHdvpa .= 0.0
     dHdvperp .= 0.0
-    # note that Coulomb logarithm factors are missing
     for isp in 1:species.n
+        # struct for Rosenbluth potentials for species s'
+        rp = rosenbluth_potentials_s[isp]
+        # add the contribution from species s' to the total
+        # note that Coulomb logarithm factors are missing
         G_factor = (zeds[is]*zeds[isp]/mass[is])^2
         H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
-        @. d2Gdvpa2 += d2Gsdvpa2[:,:,isp]*G_factor
-        @. d2Gdvperpdvpa += d2Gsdvperpdvpa[:,:,isp]*G_factor
-        @. d2Gdvperp2 += d2Gsdvperp2[:,:,isp]*G_factor
-        @. dHdvpa += dHsdvpa[:,:,isp]*H_factor
-        @. dHdvperp += dHsdvperp[:,:,isp]*H_factor
+        @. d2Gdvpa2 += rp.d2Gdvpa2*G_factor
+        @. d2Gdvperpdvpa += rp.d2Gdvperpdvpa*G_factor
+        @. d2Gdvperp2 += rp.d2Gdvperp2*G_factor
+        @. dHdvpa += rp.dHdvpa*H_factor
+        @. dHdvperp += rp.dHdvperp*H_factor
     end
     return nothing
 end
@@ -3833,17 +3828,14 @@ function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     zeds = species.zeds
     YY_arrays = fkpl_arrays.YY_arrays
     # Rosenbluth potentials for each species
-    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
-    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
-    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
-    dHsdvperp = fkpl_arrays.dHsdvperp
-    dHsdvpa = fkpl_arrays.dHsdvpa
+    rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
+    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     # Rosenbluth potentials for passing into function
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dHdvpa = fkpl_arrays.dHdvpa
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dHdvpa = rosenbluth_potentials.dHdvpa
     # moments of collisions for each cross-species pair
     delta_n_sp_s = fkpl_arrays.delta_n_sp_s
     delta_m_sp_s = fkpl_arrays.delta_m_sp_s
@@ -3869,11 +3861,12 @@ function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
         for isp in 1:species.n
             G_factor = (zeds[is]*zeds[isp]/mass[is])^2
             H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
-            @views @. d2Gdvperp2 = d2Gsdvperp2[:,:,isp]*G_factor
-            @views @. d2Gdvperpdvpa = d2Gsdvperpdvpa[:,:,isp]*G_factor
-            @views @. d2Gdvpa2 = d2Gsdvpa2[:,:,isp]*G_factor
-            @views @. dHdvpa = dHsdvpa[:,:,isp]*H_factor
-            @views @. dHdvperp = dHsdvperp[:,:,isp]*H_factor
+            rp = rosenbluth_potentials_s[isp]
+            @. d2Gdvperp2 = rp.d2Gdvperp2*G_factor
+            @. d2Gdvperpdvpa = rp.d2Gdvperpdvpa*G_factor
+            @. d2Gdvpa2 = rp.d2Gdvpa2*G_factor
+            @. dHdvpa = rp.dHdvpa*H_factor
+            @. dHdvperp = rp.dHdvperp*H_factor
             @views (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = integrate_collision_moments(pdf_in[:,:,is],d2Gdvpa2,d2Gdvperpdvpa,
                 d2Gdvperp2,dHdvpa,dHdvperp,1.0,1.0,nuref,
                 vpa,vperp,YY_arrays)
