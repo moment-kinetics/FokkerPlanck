@@ -32,8 +32,6 @@ include("fokker_planck_test.jl")
 include("fokker_planck_nonlinear_solvers.jl")
 include("fokker_planck_calculus.jl")
 
-export init_fokker_planck_collisions
-# testing
 export fokker_planck_collision_operator_weak_form!
 export fokker_planck_self_collision_operator_weak_form!
 export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
