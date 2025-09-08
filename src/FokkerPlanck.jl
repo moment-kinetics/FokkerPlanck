@@ -196,7 +196,7 @@ function fokker_planck_collision_operator_weak_form!(
         @. CCs[:,:,:] = 0.0
         for is in 1:species.n
             # self collision
-            isp = 1
+            isp = is
             nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
             # assemble weak form and solve mass matrix problem for Cssp
             @views fokker_planck_collision_operator_solve!(
