@@ -46,7 +46,7 @@ using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..velocity_moments: get_density
 using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plack_backward_euler_data,
-                                assemble_explicit_collision_operator_rhs_serial!,
+                                fokker_planck_collision_operator_solve!,
                                 enforce_vpavperp_BCs!,
                                 calculate_rosenbluth_potentials_via_elliptic_solve!,
                                 calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
@@ -54,7 +54,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
                                 advance_linearised_test_particle_collisions!,
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
                                 conserving_corrections!, density_conserving_correction!,
-                                species_info, calculate_cross_species_rosenbluth_potential_sums!
+                                species_info, calculate_cross_species_rosenbluth_potential_sums!,
+                                conservative_correction_type, fem_collision_integrals, assembled_collision_integrals
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -126,16 +127,10 @@ function fokker_planck_collision_operator_weak_form!(
              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
              calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     end
-    # assemble the RHS of the collision operator matrix eq
-    assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
-            rosenbluth_potentials,ms,msp,nussp,vpa,vperp,YY_arrays)
-    # solve the collision operator matrix eq
-    # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
-    # the 'matrix solve' functionality of ldiv!() from the LinearAlgebra package
-    sc = vec(CCssp)
-    rhsc = vec(rhsvpavperp)
-    # invert mass matrix and fill fc
-    ldiv!(sc, lu_obj_MM, rhsc)
+    # assemble weak form and solve mass matrix problem for CCssp
+    fokker_planck_collision_operator_solve!(
+                         CCssp, ffs_in, rosenbluth_potentials, ms, msp, nussp,
+                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
     return nothing
 end
 function fokker_planck_collision_operator_weak_form!(
@@ -156,9 +151,11 @@ function fokker_planck_collision_operator_weak_form!(
     @boundscheck species.n == size(ff_in,3) || throw(BoundsError(ff_in))
 
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
     lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
     YY_arrays = fkpl_arrays.YY_arrays
+    # dummy array
+    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    # storage for Rosenbluth potentials
     rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
     rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     # for each species, get the Rosenbluth potential due to that species
@@ -175,22 +172,59 @@ function fokker_planck_collision_operator_weak_form!(
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end
     end
-    # for each species, sum up the Rosenbluth potentials to make the appropriate
-    # total Rosenbluth potential, and assemble the collision operator
-    for is in 1:species.n
-        calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                rosenbluth_potentials_s,species,is)
-        # assemble the RHS of the collision operator matrix eq
-        @views assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ff_in[:,:,is],
-                rosenbluth_potentials,1.0,1.0,nuref,
-                vpa,vperp,YY_arrays)
-        # solve the collision operator matrix eq
-        # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
-        # the 'matrix solve' functionality of ldiv!() from the LinearAlgebra package
-        @views sc = vec(CCs[:,:,is])
-        rhsc = vec(rhsvpavperp)
-        # invert mass matrix and fill fc
-        ldiv!(sc, lu_obj_MM, rhsc)
+    if fkpl_arrays.conservative_corrections_option == fem_collision_integrals
+        # Version of the collision operator where we can assemble the collision operator
+        # only once per species to reduce cost, but still get the correction terms for each
+        # species species' pair of collison operators using finite-element integrals
+
+        # for each species, sum up the Rosenbluth potentials to make the appropriate
+        # total Rosenbluth potential, and assemble the collision operator
+        for is in 1:species.n
+            calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
+                    rosenbluth_potentials_s,species,is)
+            # assemble weak form and solve mass matrix problem for CCssp
+            @views fokker_planck_collision_operator_solve!(
+                         CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials, 1.0, 1.0, nuref,
+                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+        end
+    else
+        # dummy array, unused as Rosenbluth potentials are already determined
+        Cssp = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
+        Csps = fkpl_arrays.fprp_solver_data.matrix_operators.Q_dummy
+        mass = species.mass
+        zeds = species.zeds
+        @. CCs[:,:,:] = 0.0
+        for is in 1:species.n
+            # self collision
+            isp = 1
+            nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
+            # assemble weak form and solve mass matrix problem for Cssp
+            @views fokker_planck_collision_operator_solve!(
+                        Cssp, ff_in[:,:,is], rosenbluth_potentials, mass[is], mass[isp], nussp,
+                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+            # get moments
+
+            # sum up the collision operator contributions
+            @. CCs[:,:,is] += Cssp
+            # cross collision
+            for isp in is+1:species.n
+                # assemble weak form and solve mass matrix problem for Cssp
+                nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
+                @views fokker_planck_collision_operator_solve!(
+                         Cssp, ff_in[:,:,is], rosenbluth_potentials_s[isp], mass[is], mass[isp], nussp,
+                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+                # assemble weak form and solve mass matrix problem for Csps
+                nusps = nuref*(zeds[is]*zeds[isp]/mass[isp])^2
+                @views fokker_planck_collision_operator_solve!(
+                         Csps, ff_in[:,:,isp], rosenbluth_potentials_s[is], mass[isp], mass[is], nusps,
+                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+                # get the necessary moments of the collision operator
+
+                # sum up the collision operator contributions
+                @. CCs[:,:,is] += Cssp
+                @. CCs[:,:,isp] += Csps
+            end
+        end
     end
     if use_conserving_corrections
         # apply multi-species conserving terms
@@ -198,6 +232,8 @@ function fokker_planck_collision_operator_weak_form!(
     end
     return nothing
 end
+
+
 
 function fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(
                         CC::AbstractArray{mk_float,2},
@@ -294,20 +330,10 @@ function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(CC::Abstract
             end
         end
     end
-    # Need to synchronize as these arrays may be read outside the locally-owned set of
-    # ivperp, ivpa indices in assemble_explicit_collision_operator_rhs_parallel!()
-    # assemble the RHS of the collision operator matrix eq
-    assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
-      rosenbluth_potentials,1.0,1.0,nuref,
-      vpa,vperp,YY_arrays)
-
-    # solve the collision operator matrix eq
-    # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
-    # the 'matrix solve' functionality of ldiv!() from the LinearAlgebra package
-    sc = vec(CC)
-    rhsc = vec(rhsvpavperp)
-    # invert mass matrix and fill fc
-    ldiv!(sc, lu_obj_MM, rhsc)
+    # assemble weak form and solve mass matrix problem for Cs
+    @views fokker_planck_collision_operator_solve!(
+                         CC, ffs_in, rosenbluth_potentials, 1.0, 1.0, nuref,
+                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
     return nothing
 end
 
