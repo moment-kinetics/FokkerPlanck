@@ -212,6 +212,8 @@ function fokker_planck_collision_operator_weak_form!(
                 @views fokker_planck_collision_operator_solve!(
                             Cssp, ff_in[:,:,is], rosenbluth_potentials_s[isp], mass[is], mass[isp], nussp,
                             rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+                # impose any non-natural boundary conditions
+                enforce_vpavperp_BCs!(Cssp,vpa,vperp)
                 # get moments
                 delta_n_sp_s[isp,is] = get_density(Cssp, vpa, vperp)
                 delta_m_sp_s[isp,is] = mass[is]*(get_upar(Cssp, vpa, vperp, 1.0) - upar[is]*delta_n_sp_s[isp,is])
@@ -562,6 +564,9 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
                         Fresidual, F_delta_x, F_rhs_delta, Fv, Fw, nl_solver_params;
                         right_preconditioner=right_preconditioner)
         # apply BCs on result, if non-natural BCs are imposed
+        for is in 1:species.n
+            @views enforce_vpavperp_BCs!(Fnew[:,:,is],vpa,vperp)
+        end
         # should only introduce error of order ~ atol
         if use_conserving_corrections
             # ad-hoc end-of-step corrections, again introducing only ~atol error
