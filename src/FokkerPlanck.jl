@@ -44,7 +44,7 @@ using Dates
 using LinearAlgebra: lu, ldiv!
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
-using ..velocity_moments: get_density
+using ..velocity_moments: get_density, get_upar, get_pressure
 using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plack_backward_euler_data,
                                 fokker_planck_collision_operator_solve!,
                                 enforce_vpavperp_BCs!,
@@ -55,7 +55,7 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
                                 conserving_corrections!, density_conserving_correction!,
                                 species_info, calculate_cross_species_rosenbluth_potential_sums!,
-                                conservative_correction_type, fem_collision_integrals, assembled_collision_integrals
+                                multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -157,7 +157,6 @@ function fokker_planck_collision_operator_weak_form!(
     rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
     # storage for Rosenbluth potentials
     rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
-    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     # for each species, get the Rosenbluth potential due to that species
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
@@ -172,11 +171,12 @@ function fokker_planck_collision_operator_weak_form!(
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end
     end
-    if fkpl_arrays.conservative_corrections_option == fem_collision_integrals
+    if fkpl_arrays.multi_species_operator_option == single_assembly_per_species
         # Version of the collision operator where we can assemble the collision operator
         # only once per species to reduce cost, but still get the correction terms for each
         # species species' pair of collison operators using finite-element integrals
-
+        # storage for summed potentials
+        rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
         # for each species, sum up the Rosenbluth potentials to make the appropriate
         # total Rosenbluth potential, and assemble the collision operator
         for is in 1:species.n
@@ -190,39 +190,34 @@ function fokker_planck_collision_operator_weak_form!(
     else
         # dummy array, unused as Rosenbluth potentials are already determined
         Cssp = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
-        Csps = fkpl_arrays.fprp_solver_data.matrix_operators.Q_dummy
         mass = species.mass
         zeds = species.zeds
+        # moments of collisions for each cross-species pair
+        delta_n_sp_s = fkpl_arrays.delta_n_sp_s
+        delta_m_sp_s = fkpl_arrays.delta_m_sp_s
+        delta_p_sp_s = fkpl_arrays.delta_p_sp_s
+        # moments of the pdf for each species needed for below calculation
+        density = fkpl_arrays.density
+        upar = fkpl_arrays.upar
+        # collect the calculated moments
+        for is in 1:species.n
+            @views density[is] = get_density(ff_in[:,:,is], vpa, vperp)
+            @views upar[is] = get_upar(ff_in[:,:,is], vpa, vperp, density[is])
+        end
         @. CCs[:,:,:] = 0.0
         for is in 1:species.n
-            # self collision
-            isp = is
-            nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
-            # assemble weak form and solve mass matrix problem for Cssp
-            @views fokker_planck_collision_operator_solve!(
-                        Cssp, ff_in[:,:,is], rosenbluth_potentials, mass[is], mass[isp], nussp,
-                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
-            # get moments
-
-            # sum up the collision operator contributions
-            @. CCs[:,:,is] += Cssp
-            # cross collision
-            for isp in is+1:species.n
-                # assemble weak form and solve mass matrix problem for Cssp
+            for isp in 1:species.n
                 nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
+                # assemble weak form and solve mass matrix problem for Cssp
                 @views fokker_planck_collision_operator_solve!(
-                         Cssp, ff_in[:,:,is], rosenbluth_potentials_s[isp], mass[is], mass[isp], nussp,
-                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
-                # assemble weak form and solve mass matrix problem for Csps
-                nusps = nuref*(zeds[is]*zeds[isp]/mass[isp])^2
-                @views fokker_planck_collision_operator_solve!(
-                         Csps, ff_in[:,:,isp], rosenbluth_potentials_s[is], mass[isp], mass[is], nusps,
-                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
-                # get the necessary moments of the collision operator
-
+                            Cssp, ff_in[:,:,is], rosenbluth_potentials_s[isp], mass[is], mass[isp], nussp,
+                            rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+                # get moments
+                delta_n_sp_s[isp,is] = get_density(Cssp, vpa, vperp)
+                delta_m_sp_s[isp,is] = mass[is]*(get_upar(Cssp, vpa, vperp, 1.0) - upar[is]*delta_n_sp_s[isp,is])
+                delta_p_sp_s[isp,is] = get_pressure(Cssp, vpa, vperp, upar[is], mass[is])
                 # sum up the collision operator contributions
                 @. CCs[:,:,is] += Cssp
-                @. CCs[:,:,isp] += Csps
             end
         end
     end

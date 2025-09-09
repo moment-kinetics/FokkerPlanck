@@ -5,8 +5,9 @@ using FokkerPlanck: fokker_plack_backward_euler_data,fokker_planck_self_collisio
                                     fokker_planck_self_collision_operator_weak_form!,
                                     fokker_planck_collisions_backward_euler_step!,
                                     fokker_planck_collision_operator_weak_form!,
-                                    fokkerplanck_weakform_arrays_struct
-using FokkerPlanck.fokker_planck_calculus: multipole_expansion, boundary_data_type
+                                    fokkerplanck_weakform_arrays_struct,
+                                    multipole_expansion, boundary_data_type,
+                                    multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
@@ -163,6 +164,7 @@ function test_multispecies_implicit_collisions(;
     test_numerical_conserving_terms=false::Bool,
     test_numerical_conserving_terms_on_C=true::Bool,
     boundary_data_option=multipole_expansion::boundary_data_type,
+    multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
     # if ci test, return initial and final pdfs for regression testing
@@ -198,6 +200,7 @@ function test_multispecies_implicit_collisions(;
                         bc_vpa=bc_vpa,
                         bc_vperp=bc_vperp,
                         boundary_data_option=boundary_data_option,
+                        multi_species_operator_option=multi_species_operator_option,
                         nl_solver_atol=atol,
                         nl_solver_rtol=rtol,
                         nl_solver_nonlinear_max_iterations=nonlinear_max_iterations,

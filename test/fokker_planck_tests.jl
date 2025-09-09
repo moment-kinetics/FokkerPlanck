@@ -12,7 +12,8 @@ using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inp
                                 natural_boundary_condition, zero_boundary_condition
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
-using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole
+using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole,
+                                            repeat_assembly_per_species, single_assembly_per_species
 
 using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info
@@ -91,7 +92,7 @@ function backward_Euler_linearised_collisions_test(;
                                                                 Lvpa=10.0,Lvperp=5.0,
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
     species = species_info([ms],[1.0])
-    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
                         0.0, 0.0, 0, print_to_screen)
     dummy_array = allocate_float(vpa.n,vperp.n)
     FMaxwell = allocate_float(vpa.n,vperp.n)
@@ -216,6 +217,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false,
     test_numerical_conserving_terms=true,
     boundary_data_option=multipole_expansion,
+    multi_species_operator_option=repeat_assembly_per_species,
     print_to_screen=true,
     # error tolerances
     atol_max = 2.0e-5,
@@ -230,7 +232,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     nl_solver_atol=1.0e-10
     nl_solver_rtol=0.0
     nl_solver_nonlinear_max_iterations=20
-    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
                         nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
                         print_to_screen)
 

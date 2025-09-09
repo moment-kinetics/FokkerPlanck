@@ -25,7 +25,7 @@ export calculate_rosenbluth_potential_boundary_data_exact!
 export test_rosenbluth_potential_boundary_data
 export interpolate_2D_vspace!
 export matrix_inverse
-export conservative_correction_type, fem_collision_integrals, assembled_collision_integrals
+export multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 export calculate_collision_moments!
 export fokker_planck_collision_operator_solve!
 
@@ -66,9 +66,9 @@ export delta_f_multipole
 """
 Option for selecting conservative terms strategy
 """
-@enum conservative_correction_type begin
-    fem_collision_integrals
-    assembled_collision_integrals
+@enum multi_species_operator_type begin
+    single_assembly_per_species
+    repeat_assembly_per_species
 end
 
 """
@@ -813,7 +813,7 @@ struct fokkerplanck_weakform_arrays_struct
     # dummy array for end-of-step corrections
     delta_pdf::Array{mk_float,3}
     # option to control which numerical error corrections method to use
-    conservative_corrections_option::conservative_correction_type
+    multi_species_operator_option::multi_species_operator_type
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
@@ -824,7 +824,7 @@ struct fokkerplanck_weakform_arrays_struct
                                                 vperp::finite_element_coordinate,
                                                 species::species_info,
                                                 boundary_data_option::boundary_data_type;
-                                                conservative_corrections_option=fem_collision_integrals::conservative_correction_type,
+                                                multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
                                                 print_to_screen=true::Bool)
         YY_arrays = YY_collision_operator_arrays(vpa,vperp)
         fprp_solver_data = fokkerplanck_rosenbluth_potential_solver_data(vpa,vperp,
@@ -856,7 +856,7 @@ struct fokkerplanck_weakform_arrays_struct
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
                     density, upar, pressure, ppar, qpar, rmom,
                     delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf,
-                    conservative_corrections_option)
+                    multi_species_operator_option)
     end
 end
 
@@ -911,6 +911,7 @@ struct fokker_plack_backward_euler_data
         bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
         bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
         boundary_data_option=multipole_expansion::boundary_data_type,
+        multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
         nl_solver_atol=1.0e-10::mk_float,
         nl_solver_rtol=0.0::mk_float,
         nl_solver_nonlinear_max_iterations=20::mk_int,
@@ -923,7 +924,8 @@ struct fokker_plack_backward_euler_data
                                     bc=bc_vpa)
         species = species_info(mass,zeds)
         # use constructor function for fokkerplanck_weakform_arrays_struct
-        return fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,
+        return fokker_plack_backward_euler_data(vpa,vperp,species,
+                    boundary_data_option,multi_species_operator_option,
                     nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
                     print_to_screen)
     end
@@ -932,6 +934,7 @@ struct fokker_plack_backward_euler_data
                                     vperp::finite_element_coordinate,
                                     species::species_info,
                                     boundary_data_option::boundary_data_type,
+                                    multi_species_operator_option::multi_species_operator_type,
                                     nl_solver_atol::mk_float,
                                     nl_solver_rtol::mk_float,
                                     nl_solver_nonlinear_max_iterations::mk_int,
@@ -970,6 +973,7 @@ struct fokker_plack_backward_euler_data
         # data for the FP operators
         fp_operator = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,
                                                 boundary_data_option;
+                                                multi_species_operator_option=multi_species_operator_option,
                                                 print_to_screen=print_to_screen)
         return new(CC,CCs,
             CC2D_sparse,CC2D_sparse_constructor,
@@ -3649,7 +3653,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
                             pdf_in::AbstractArray{mk_float,3}, nuref::mk_float,
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     @inbounds begin
-        if fkpl_arrays.conservative_corrections_option == fem_collision_integrals
+        if fkpl_arrays.multi_species_operator_option == single_assembly_per_species
             # calculate necessary moments and store in fkpl_arrays
             calculate_collision_moments!(pdf_in,nuref,fkpl_arrays)
         end
@@ -3669,6 +3673,15 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         ppar = fkpl_arrays.ppar
         qpar = fkpl_arrays.qpar
         rmom = fkpl_arrays.rmom
+        # collect the calculated moments
+        for is in 1:species.n
+            @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
+            @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
+            @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+        end
         # correction coefficients
         zcoeffs = fkpl_arrays.correction_coeffs_z
         # first get the correction coefficients
@@ -3831,67 +3844,6 @@ function density_conserving_correction!(CC::AbstractArray{mk_float,2},
         end
     end
 end
-
-function calculate_collision_moments!(CCssp_in::AbstractArray{mk_float,2},
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    # call the lower level function after expanding some variables
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    species = fkpl_arrays.species
-    mass = species.mass
-    zeds = species.zeds
-    YY_arrays = fkpl_arrays.YY_arrays
-    # Rosenbluth potentials for each species
-    rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
-    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
-    # Rosenbluth potentials for passing into function
-    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
-    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
-    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
-    dHdvperp = rosenbluth_potentials.dHdvperp
-    dHdvpa = rosenbluth_potentials.dHdvpa
-    # moments of collisions for each cross-species pair
-    delta_n_sp_s = fkpl_arrays.delta_n_sp_s
-    delta_m_sp_s = fkpl_arrays.delta_m_sp_s
-    delta_p_sp_s = fkpl_arrays.delta_p_sp_s
-    # moments of the pdf for each species
-    density = fkpl_arrays.density
-    upar = fkpl_arrays.upar
-    pressure = fkpl_arrays.pressure
-    ppar = fkpl_arrays.ppar
-    qpar = fkpl_arrays.qpar
-    rmom = fkpl_arrays.rmom
-    # collect the calculated moments
-    for is in 1:species.n
-        @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
-        @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
-        @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-    end
-    # collect the collision integrals
-    for is in 1:species.n
-        for isp in 1:species.n
-            G_factor = (zeds[is]*zeds[isp]/mass[is])^2
-            H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
-            rp = rosenbluth_potentials_s[isp]
-            @. d2Gdvperp2 = rp.d2Gdvperp2*G_factor
-            @. d2Gdvperpdvpa = rp.d2Gdvperpdvpa*G_factor
-            @. d2Gdvpa2 = rp.d2Gdvpa2*G_factor
-            @. dHdvpa = rp.dHdvpa*H_factor
-            @. dHdvperp = rp.dHdvperp*H_factor
-            @views (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = integrate_collision_moments(pdf_in[:,:,is],d2Gdvpa2,d2Gdvperpdvpa,
-                d2Gdvperp2,dHdvpa,dHdvperp,1.0,1.0,nuref,
-                vpa,vperp,YY_arrays)
-            delta_n_sp_s[isp,is] = int_C
-            delta_m_sp_s[isp,is] = mass[is]*(int_vpa_C - upar[is]*int_C)
-            delta_p_sp_s[isp,is] = (mass[is]/3.0)*(int_vpa2_C - 2*upar[is]*int_vpa_C
-                                     + (upar[is]^2)*int_C + int_vperp2_C)
-        end
-    end
-    return nothing
-end
 ##
 # element-wise integration function to get moments of C(vpa,vperp) without assembling C
 ##
@@ -3920,18 +3872,10 @@ function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     # moments of the pdf for each species
     density = fkpl_arrays.density
     upar = fkpl_arrays.upar
-    pressure = fkpl_arrays.pressure
-    ppar = fkpl_arrays.ppar
-    qpar = fkpl_arrays.qpar
-    rmom = fkpl_arrays.rmom
-    # collect the calculated moments
+    # collect the calculated moments needed for the calculation below
     for is in 1:species.n
         @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
         @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
-        @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
     end
     # collect the collision integrals
     for is in 1:species.n
