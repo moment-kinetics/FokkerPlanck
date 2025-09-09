@@ -216,7 +216,7 @@ function test_multispecies_implicit_collisions(;
     else
         Fold = allocate_float(vpa.n,vperp.n,species.n)
     end
-    CC = allocate_float(vpa.n,vperp.n,species.n)
+    CC = fkpl_arrays.CCs # needed for dSdt diagnostic
     # dummy arrays needed for diagnostics
     Fout = allocate_float(vpa.n,vperp.n,species.n,2)
     Fdummy1 = allocate_float(vpa.n,vperp.n,species.n)
