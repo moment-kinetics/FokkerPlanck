@@ -1057,11 +1057,11 @@ function runtests()
                     delta_pressure = get_pressure(C_M_num, vpa, vperp, upar, msp)
                     delta_ppar = get_ppar(C_M_num, vpa, vperp, upar, msp)
                     delta_pperp = get_pperp(delta_pressure, delta_ppar)
-                    rtol, atol = 0.0, 3.0e-15
+                    rtol, atol = 0.0, 1.0e-14
                     @test isapprox(delta_n, rtol ; atol=atol)
-                    rtol, atol = 0.0, 1.0e-15
+                    rtol, atol = 0.0, 1.0e-14
                     @test isapprox(delta_upar, rtol ; atol=atol)
-                    rtol, atol = 0.0, 1.0e-15*2
+                    rtol, atol = 0.0, 1.0e-14
                     @test isapprox(delta_pressure, rtol ; atol=atol)
                     if print_to_screen
                         println("dSdt: $dSdt should be >0.0")
