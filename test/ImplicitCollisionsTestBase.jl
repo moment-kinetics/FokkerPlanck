@@ -337,8 +337,8 @@ function print_pdf(pdf::AbstractArray{mk_float,4})
     return nothing
 end
 
-struct pdf_and_grid{N}
+struct pdf_and_grid
     vpa_grid::Vector{mk_float}
     vperp_grid::Vector{mk_float}
-    pdf::AbstractArray{mk_float,N}
+    pdf::AbstractArray{mk_float,4}
 end

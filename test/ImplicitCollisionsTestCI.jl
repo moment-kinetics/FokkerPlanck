@@ -6,7 +6,7 @@ include(joinpath(@__DIR__,"ImplicitCollisionsTest.jl"))
 ######################
 # Single species tests
 ######################
-expected_chebyshev = pdf_and_grid{4}(
+expected_chebyshev = pdf_and_grid(
 # Expected vpa
 [-4.000000000000000, -3.333333333333333, -2.666666666666667, -2.000000000000000, -1.333333333333333, -0.666666666666667, 0.000000000000000, 0.666666666666667, 1.333333333333333, 2.000000000000000, 2.666666666666667, 3.333333333333333, 4.000000000000000],
 # Expected vperp
@@ -39,7 +39,7 @@ expected_chebyshev = pdf_and_grid{4}(
 -0.000419500329671 -0.000342252634551 -0.000246202222563 -0.000082179592320 0.000018995475540 0.000009836521746 -0.000005667096666 ;
 0.000596384925964 0.000444767269378 0.000311177941230 0.000135314573420 0.000010088106241 -0.000006513112995 0.000007566148981 ])
 
-expected_gausslegendre = pdf_and_grid{4}(
+expected_gausslegendre = pdf_and_grid(
     # Expected vpa
 [-4.000000000000000, -3.333333333333333, -2.666666666666667, -2.000000000000000, -1.333333333333333, -0.666666666666667, 0.000000000000000, 0.666666666666667, 1.333333333333333, 2.000000000000000, 2.666666666666667, 3.333333333333333, 4.000000000000000],
 # Expected vperp
@@ -78,7 +78,7 @@ atol = 1.0e-13
     @testset "Gauss Legendre" begin
         println("    - test Gauss Legendre")
         for test_input_array_type in (true,false)
-            output_pdf_and_grid = test_implicit_collisions_api(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
+            output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
             vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
                 ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
                 test_external_chebyshev_grid=false, continuous_integration_test=true,
@@ -92,7 +92,7 @@ atol = 1.0e-13
     end
     @testset "Gauss Chebyshev" begin
         println("    - test Gauss Chebyshev")
-        output_pdf_and_grid = test_implicit_collisions_api(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
+        output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
            vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
             test_external_chebyshev_grid=true, continuous_integration_test=true)
