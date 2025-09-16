@@ -542,28 +542,29 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
                                     atol_L2 = 1.0e-7,
                                     print_to_screen=false
                                     )
-    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                    Lvpa=10.0,Lvperp=5.0,
-                                    bc_vpa=natural_boundary_condition,
-                                    bc_vperp=natural_boundary_condition)
     nuref = 1.0
     #test_numerical_conserving_terms = false
     test_Maxwellian_Rosenbluth_coefficients = false
     density = [1.0, 1.0, 1.0]
     upar = [1.0, -0.7, 0.2]
     vth = [1.0,1.0,1.0]
-    @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds)" for
-            (boundary_data_option, species) in (#(direct_integration,species_info([0.5],[2.0]),),
-                                                (multipole_expansion,species_info([0.5],[2.0]),),
-                                                (delta_f_multipole,species_info([0.5],[2.0]),),
-                                                (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),),
-                                                (delta_f_multipole,species_info([0.5,1.0,2.0],[2.0,-1.0,1.0]),),
+    @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
+            (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
+                                                (multipole_expansion,species_info([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,species_info([0.5],[2.0]),zero_boundary_condition,repeat_assembly_per_species),
+                                                (delta_f_multipole,species_info([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),zero_boundary_condition,repeat_assembly_per_species),
+                                                (delta_f_multipole,species_info([0.5,1.0,2.0],[2.0,-1.0,1.0]),natural_boundary_condition,single_assembly_per_species),
                                                 )
-        println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds)")
+        vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+            Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
+        println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)")
         @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
             (test_numerical_conserving_terms,) in (false,true)
             println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
             fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                                            multi_species_operator_option=multi_species_operator_option,
                                                             print_to_screen=print_to_screen)
             # arrays for the test
             F_M = allocate_float(vpa.n,vperp.n,species.n)
