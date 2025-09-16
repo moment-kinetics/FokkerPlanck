@@ -33,7 +33,6 @@ include("fokker_planck_nonlinear_solvers.jl")
 include("fokker_planck_calculus.jl")
 
 export fokker_planck_collision_operator_weak_form!
-export fokker_planck_self_collision_operator_weak_form!
 export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 export calculate_entropy_production
 # implicit advance
@@ -58,25 +57,6 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
-
-function fokker_planck_self_collision_operator_weak_form!(
-                         CC::AbstractArray{mk_float,2},
-                         pdf_in::AbstractArray{mk_float,2}, ms::mk_float, nuss::mk_float,
-                         fkpl_arrays::fokkerplanck_weakform_arrays_struct;
-                         use_conserving_corrections=true::Bool)
-    # first argument is Fs, and second argument is Fs' in C[Fs,Fs']
-    @views fokker_planck_collision_operator_weak_form!(CC,
-        pdf_in, pdf_in, ms, ms, nuss, fkpl_arrays)
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    # enforce the boundary conditions on CC before it is used for timestepping
-    enforce_vpavperp_BCs!(CC,vpa,vperp)
-    # make ad-hoc conserving corrections appropriate only for the self operator
-    if use_conserving_corrections
-        conserving_corrections!(CC, pdf_in, vpa, vperp, ms)
-    end
-    return nothing
-end
 
 """
 Function for evaluating \$C_{ss'} = C_{ss'}[F_s,F_{s'}]\$

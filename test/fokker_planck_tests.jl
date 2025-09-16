@@ -349,74 +349,6 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     return nothing
 end
 
-function numerical_error_corrections_test(;
-    ngrid = 5, # chosen for a quick test -- direct integration is slow!
-    nelement_vpa = 8,
-    nelement_vperp = 4,
-    Lvpa = 12.0,
-    Lvperp = 6.0,
-    abeam = 0.5,
-    vpa0 = 1.0,
-    vperp0 = 1.0,
-    vth0 = 0.5,
-    atol = 1.0e-14,
-    mass = 2.0,
-    print_to_screen=false,
-    )
-    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                                                Lvpa=Lvpa,Lvperp=Lvperp)
-    boundary_data_option = multipole_expansion
-    species = species_info([1.0],[1.0])
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
-                                        print_to_screen=print_to_screen)
-
-    pdf_in = allocate_float(vpa.n,vperp.n)
-    C_num = allocate_float(vpa.n,vperp.n)
-    denss, upars, vths = 1.0, 1.0, 1.0
-    # initialise a distribution that has a qpar
-    for ivperp in 1:vperp.n
-        for ivpa in 1:vpa.n
-            pdf_in[ivpa,ivperp] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
-                                   + F_Beam(0.0,vperp0,vth0,vpa,vperp,ivpa,ivperp))
-        end
-    end
-    dens = get_density(pdf_in, vpa, vperp)
-    upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar, mass)
-    vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf_in, vpa, vperp, upar, mass)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar, mass)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar, mass)
-    # check test pdf unchanged
-    if abeam == 0.5 && vpa0 == 1.0 && vperp0 == 1.0 && vth0 == 0.5
-        @test isapprox(dens, 7.416900452984803, atol=atol)
-        @test isapprox(upar, 0.33114644602432997, atol=atol)
-        @test isapprox(vth, 1.0695323945144575, atol=atol)
-        @test isapprox(qpar, mass*0.29147880412034594, atol=atol)
-        @test isapprox(rmom, mass*27.57985752143237, atol=6*atol)
-    end
-
-    # fill C_num with a pdf that definitely has a density, mean flow, and pressure (unlike C[F,F])
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                C_num[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            end
-        end
-    end
-    # make ad-hoc conserving corrections to remove the denisty, mean flow, and pressure
-    conserving_corrections!(C_num,pdf_in,vpa,vperp,mass)
-
-    # check CC now has zero density, flow, and pressure moments
-    dn = get_density(C_num, vpa, vperp)
-    du = get_upar(C_num, vpa, vperp, 1.0)
-    dp = get_pressure(C_num, vpa, vperp, upar, mass)
-    @test abs(dn) < atol
-    @test abs(du) < atol
-    @test abs(dp) < atol
-    return nothing
-end
-
 function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
     vpa::finite_element_coordinate,
     vperp::finite_element_coordinate,
@@ -1011,7 +943,9 @@ function runtests()
             nelement_vpa = 8
             nelement_vperp = 4
             vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                    Lvpa=12.0,Lvperp=6.0)
+                                    Lvpa=12.0,Lvperp=6.0,
+                                    bc_vpa=natural_boundary_condition,
+                                    bc_vperp=natural_boundary_condition)
             boundary_data_option=direct_integration
             species = species_info([1.0],[1.0])
             fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
@@ -1058,8 +992,13 @@ function runtests()
                 if test_numerical_conserving_terms && test_self_operator
                     # enforce the boundary conditions on CC before it is used for timestepping
                     enforce_vpavperp_BCs!(C_M_num,vpa,vperp)
-                    # make ad-hoc conserving corrections
-                    conserving_corrections!(C_M_num,Fs_M,vpa,vperp,ms)
+                    # make ad-hoc conserving corrections for self operator using multispecies function
+                    # reshaped views to the original arrays to match the multi-species interface
+                    Cvpavperps = reshape(C_M_num,(vpa.n,vperp.n,species.n))
+                    Fvpavperps = reshape(Fs_M,(vpa.n,vperp.n,species.n))
+                    # copy correct Rosenbluth potentials into the arrays used in conserving_corrections!()
+                    fkpl_arrays.rosenbluth_potentials_s[1] = fkpl_arrays.rosenbluth_potentials
+                    conserving_corrections!(Cvpavperps,Fvpavperps,nussp,fkpl_arrays)
                 end
                 C_M_max, C_M_L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
                 if test_self_operator && !test_numerical_conserving_terms && !use_Maxwellian_Rosenbluth_coefficients
@@ -1117,7 +1056,7 @@ function runtests()
                     delta_pressure = get_pressure(C_M_num, vpa, vperp, upar, msp)
                     delta_ppar = get_ppar(C_M_num, vpa, vperp, upar, msp)
                     delta_pperp = get_pperp(delta_pressure, delta_ppar)
-                    rtol, atol = 0.0, 1.0e-15
+                    rtol, atol = 0.0, 3.0e-15
                     @test isapprox(delta_n, rtol ; atol=atol)
                     rtol, atol = 0.0, 1.0e-15
                     @test isapprox(delta_upar, rtol ; atol=atol)
@@ -1350,7 +1289,6 @@ function runtests()
 
         @testset "numerical error correcting terms" begin
             println("    - test numerical error correcting terms")
-            numerical_error_corrections_test(print_to_screen=print_to_screen)
             multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen)
         end
 

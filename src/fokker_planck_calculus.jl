@@ -3591,42 +3591,7 @@ the finite-element implementation, \$u_{\\|}\$ is the parallel velocity of \$F_s
 and \$x_0,x_1,x_2\$ are parameters that are chosen so that \$C_{ss}\$
 conserves density, parallel velocity and pressure of \$F_s\$.
 """
-function conserving_corrections!(CC::AbstractArray{mk_float,2},
-                            pdf_in::AbstractArray{mk_float,2},
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            mass::mk_float)
-    # compute moments of the input pdf
-    dens = get_density(pdf_in, vpa, vperp)
-    upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar, mass)
-    vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf_in, vpa, vperp, upar, mass)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar, mass)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar, mass)
-
-    # compute moments of the numerical collision operator
-    dn = get_density(CC, vpa, vperp)
-    du = get_upar(CC, vpa, vperp, 1.0)
-    dp = get_pressure(CC, vpa, vperp, upar, mass)
-
-    # form the appropriate matrix coefficients
-    b0, b1, b2 = mass*dn, mass*(du - upar*dn), 3.0*dp
-    A00, A02, A11, A12, A22 = mass*dens, 3.0*pressure, ppar, 2.0*qpar, rmom
-
-    # obtain the coefficients for the corrections
-    (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
-
-    # correct CC
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                wpar = vpa.grid[ivpa] - upar
-                CC[ivpa,ivperp] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp]
-            end
-        end
-    end
-end
+# corrections to preserve the symmetry of the collision operators
 function conserving_corrections!(CC::AbstractArray{mk_float,3},
                             pdf_in::AbstractArray{mk_float,3}, nuref::mk_float,
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
@@ -3719,6 +3684,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
     end # @inbounds
     return nothing
 end
+# corrections to preserve the density, total momentum and total energy in the pdf(vpa,vperp,species)
 function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
                             pdf_old::AbstractArray{mk_float,3},
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
