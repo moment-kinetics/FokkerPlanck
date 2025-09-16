@@ -37,7 +37,6 @@ using ..coordinates: first_derivative!, finite_element_coordinate, scalar_coordi
 using ..velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using ..fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
-using ..fokker_planck_nonlinear_solvers: setup_fp_nl_solve
 using Dates
 using SpecialFunctions: ellipk, ellipe
 using SparseArrays: sparse, AbstractSparseArray
@@ -863,7 +862,6 @@ end
 struct fokker_plack_backward_euler_data
     # arrays for storing collision operator computed
     # when iterating in the backward Euler step
-    CC::Array{mk_float,2}
     CCs::Array{mk_float,3}
     # matrices for storing preconditioner
     # based on I - dt * C[delta F, F]
@@ -872,13 +870,6 @@ struct fokker_plack_backward_euler_data
     lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
     lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
     # dummy arrays for Jacobian-Free-Newton-Krylov solver
-    nl_solver_data::nl_solver_info{Array{mk_float,2},Array{mk_float,3},Array{mk_float,1}}
-    Fnew::Array{mk_float,2}
-    Fresidual::Array{mk_float,2}
-    F_delta_x::Array{mk_float,2}
-    F_rhs_delta::Array{mk_float,2}
-    Fv::Array{mk_float,2}
-    Fw::Array{mk_float,2}
     # multispecies dummy arrays
     nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
     Fs_new::Array{mk_float,3}
@@ -941,7 +932,6 @@ struct fokker_plack_backward_euler_data
                                     print_to_screen::Bool)
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         # collision operator arrays for intermediate results
-        CC = allocate_float(nvpa,nvperp)
         CCs = allocate_float(nvpa,nvperp,nspecies)
         # preconditioner matrix
         CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
@@ -950,16 +940,6 @@ struct fokker_plack_backward_euler_data
             lu_objs_CC2D[is] = lu_obj_CC2D
         end
         # dummy arrays for JFNK
-        nl_solver_data = setup_fp_nl_solve(vpa,vperp;
-                                        atol=nl_solver_atol,
-                                        rtol=nl_solver_rtol,
-                                        nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
-        Fnew = allocate_float(nvpa,nvperp)
-        Fresidual = allocate_float(nvpa,nvperp)
-        F_delta_x = allocate_float(nvpa,nvperp)
-        F_rhs_delta = allocate_float(nvpa,nvperp)
-        Fv = allocate_float(nvpa,nvperp)
-        Fw = allocate_float(nvpa,nvperp)
         nl_solver_data_s = nl_solver_info((species=species,vperp=vperp,vpa=vpa);
                                         atol=nl_solver_atol,
                                         rtol=nl_solver_rtol,
@@ -975,11 +955,9 @@ struct fokker_plack_backward_euler_data
                                                 boundary_data_option;
                                                 multi_species_operator_option=multi_species_operator_option,
                                                 print_to_screen=print_to_screen)
-        return new(CC,CCs,
-            CC2D_sparse,CC2D_sparse_constructor,
-            lu_obj_CC2D,lu_objs_CC2D,
-            nl_solver_data,
-            Fnew,Fresidual,F_delta_x,F_rhs_delta,Fv,Fw,
+        return new(CCs,
+            CC2D_sparse,CC2D_sparse_constructor,lu_obj_CC2D,
+            lu_objs_CC2D,
             nl_solver_data_s,
             Fs_new,Fs_residual,Fs_delta_x,Fs_rhs_delta,Fsv,Fsw,
             fp_operator)

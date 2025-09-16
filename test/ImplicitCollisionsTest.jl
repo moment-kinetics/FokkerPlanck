@@ -1,13 +1,12 @@
 using Dates
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: fokker_plack_backward_euler_data,fokker_planck_self_collisions_backward_euler_step!,
-                                    fokker_planck_self_collision_operator_weak_form!,
-                                    fokker_planck_collisions_backward_euler_step!,
-                                    fokker_planck_collision_operator_weak_form!,
-                                    fokkerplanck_weakform_arrays_struct,
-                                    multipole_expansion, boundary_data_type,
-                                    multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
+using FokkerPlanck: fokker_plack_backward_euler_data,
+                    fokker_planck_collisions_backward_euler_step!,
+                    fokker_planck_collision_operator_weak_form!,
+                    fokkerplanck_weakform_arrays_struct,
+                    multipole_expansion, boundary_data_type,
+                    multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
