@@ -18,7 +18,7 @@ using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansi
 using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info
 using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
-using FokkerPlanck: fokker_planck_self_collisions_backward_euler_step!, calculate_entropy_production
+using FokkerPlanck: fokker_planck_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, F_Beam
 using FokkerPlanck.fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
@@ -237,31 +237,43 @@ function backward_Euler_fokker_planck_self_collisions_test(;
                         print_to_screen)
 
     # initial condition
-    Fold = allocate_float(vpa.n,vperp.n)
+    Fold = allocate_float(vpa.n,vperp.n,species.n)
     @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                Fold[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    Fold[ivpa,ivperp,is] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                end
             end
         end
     end
     if vpa.bc == zero_boundary_condition
-        @inbounds for ivperp in 1:vperp.n
-            Fold[1,ivperp] = 0.0
-            Fold[end,ivperp] = 0.0
+        @inbounds begin
+            for is in 1:species.n
+                for ivperp in 1:vperp.n
+                    Fold[1,ivperp,is] = 0.0
+                    Fold[end,ivperp,is] = 0.0
+                end
+            end
         end
     end
     if vperp.bc == zero_boundary_condition
-        @inbounds for ivpa in 1:vpa.n
-            Fold[ivpa,end] = 0.0
+        @inbounds begin
+            for is in 1:species.n
+                for ivpa in 1:vpa.n
+                    Fold[ivpa,end,is] = 0.0
+                end
+            end
         end
     end
     # normalise to unit density
-    @views densfac = get_density(Fold[:,:],vpa,vperp)
     @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                Fold[ivpa,ivperp] /= densfac
+        for is in 1:species.n
+        @views densfac = get_density(Fold[:,:,is],vpa,vperp)
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    Fold[ivpa,ivperp,is] /= densfac
+                end
             end
         end
     end
@@ -269,59 +281,70 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     Fdummy1 = allocate_float(vpa.n,vperp.n)
     Fdummy2 = allocate_float(vpa.n,vperp.n)
     Fdummy3 = allocate_float(vpa.n,vperp.n)
-    FMaxwell = allocate_float(vpa.n,vperp.n)
+    FMaxwell = allocate_float(vpa.n,vperp.n,species.n)
+    density = allocate_float(species.n)
+    upar = allocate_float(species.n)
+    vth = allocate_float(species.n)
     # physics parameters
-    ms = 1.0
     nuss = 1.0
-
     # initial condition
     time = 0.0
     # Maxwellian and parameters
-    dens = get_density(Fold,vpa,vperp)
-    upar = get_upar(Fold, vpa, vperp, dens)
-    pressure = get_pressure(Fold, vpa, vperp, upar, ms)
-    vth = sqrt(2.0*pressure/(dens*ms))
     @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                FMaxwell[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+        for is in 1:species.n
+            @views density[is] = get_density(Fold[:,:,is],vpa,vperp)
+            @views upar[is] = get_upar(Fold[:,:,is], vpa, vperp, density[is])
+            @views pressure = get_pressure(Fold[:,:,is], vpa, vperp, upar[is], species.mass[is])
+            vth[is] = sqrt(2.0*pressure/(density[is]*species.mass[is]))
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    FMaxwell[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                end
             end
         end
     end
 
     if print_to_screen
-        diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,vpa,vperp,time,ms,0)
+        for is in 1:species.n
+            @views diagnose_F_Maxwellian(Fold[:,:,is],Fdummy1,Fdummy2,Fdummy3,vpa,vperp,time,species.mass[is],0)
+        end
     end
     for it in 1:ntime
-        fokker_planck_self_collisions_backward_euler_step!(Fold, delta_t, ms, nuss, fkpl_arrays,
+        fokker_planck_collisions_backward_euler_step!(Fold, delta_t, nuss, fkpl_arrays,
             use_conserving_corrections=test_numerical_conserving_terms,
             test_particle_preconditioner=test_particle_preconditioner,
             test_linearised_advance=test_linearised_advance,
             use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
         # update the pdf
-        Fnew = fkpl_arrays.Fnew
+        Fnew = fkpl_arrays.Fs_new
         @inbounds begin
-            for ivperp in 1:vperp.n
-                for ivpa in 1:vpa.n
-                    Fold[ivpa,ivperp] = Fnew[ivpa,ivperp]
+            for is in 1:species.n
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                        Fold[ivpa,ivperp,is] = Fnew[ivpa,ivperp,is]
+                    end
                 end
             end
         end
         # diagnose Fold
         time += delta_t
         if print_to_screen
-            diagnose_F_Maxwellian(Fold,Fdummy1,Fdummy2,Fdummy3,vpa,vperp,time,ms,it)
+            for is in 1:species.n
+                @views diagnose_F_Maxwellian(Fold[:,:,is],Fdummy1,Fdummy2,Fdummy3,vpa,vperp,time,species.mass[is],0)
+            end
         end
     end
 
     # now check distribution
-    test_F_Maxwellian(FMaxwell,Fold,
-            vpa,vperp,
-            Fdummy2,Fdummy3,
-            dens, upar, vth, ms,
-            atol_max, atol_L2,
-            atol_dens, atol_upar, atol_vth,
-            print_to_screen=print_to_screen)
+    for is in 1:species.n
+        @views test_F_Maxwellian(FMaxwell[:,:,is],Fold[:,:,is],
+                    vpa,vperp,
+                    Fdummy2,Fdummy3,
+                    density[is], upar[is], vth[is], species.mass[is],
+                    atol_max, atol_L2,
+                    atol_dens, atol_upar, atol_vth,
+                    print_to_screen=print_to_screen)
+    end
 
     return nothing
 end
