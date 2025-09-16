@@ -11,7 +11,61 @@ using FokkerPlanck: fokker_plack_backward_euler_data,fokker_planck_self_collisio
 
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
-
+function test_implicit_collisions_api(;
+    # initial pdf info
+    vth0=0.5::mk_float, vperp0=1.0::mk_float, vpa0=0.0::mk_float, zbeam=0.0::mk_float,
+    # grid info
+    ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
+    Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
+    # boundary condition info
+    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+    # time advance info
+    ntime=1::mk_int,delta_t=1.0::mk_float,
+    # nonlinea r solver options
+    atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
+    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
+    # model options
+    test_linearised_advance=false::Bool,
+    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
+    test_numerical_conserving_terms=false::Bool,
+    boundary_data_option=multipole_expansion::boundary_data_type,
+    test_external_chebyshev_grid=false::Bool,
+    print_diagnostics=true::Bool, print_timing=true::Bool,
+    # if ci test, return initial and final pdfs for regression testing
+    continuous_integration_test=false::Bool,
+    # if external user, may pass a slice of an array into functions
+    test_input_array_type=false::Bool)
+    return test_multispecies_implicit_collisions(;
+        # initial pdf info
+        vth0=[vth0], vperp0=[vperp0], vpa0=[vpa0], zbeam=[zbeam],
+        # species info
+        mass=[1.0], zeds=[1.0], density_in=[1.0],
+        # grid info
+        ngrid=ngrid, nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
+        Lvpa=Lvpa, Lvperp=Lvperp,
+        # boundary condition info
+        bc_vpa=bc_vpa,
+        bc_vperp=bc_vperp,
+        # time advance info
+        ntime=ntime,delta_t=delta_t,
+        # nonlinear solver options
+        atol = atol, rtol = rtol,
+        nonlinear_max_iterations = nonlinear_max_iterations, test_particle_preconditioner=test_particle_preconditioner,
+        # model options
+        test_linearised_advance=test_linearised_advance,
+        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner,
+        test_numerical_conserving_terms=test_numerical_conserving_terms,
+        test_numerical_conserving_terms_on_C=test_numerical_conserving_terms,
+        boundary_data_option=boundary_data_option,
+        multi_species_operator_option=repeat_assembly_per_species,
+        test_external_chebyshev_grid=test_external_chebyshev_grid,
+        print_diagnostics=print_diagnostics, print_timing=print_timing,
+        # if ci test, return initial and final pdfs for regression testing
+        continuous_integration_test=continuous_integration_test,
+        # if external user, may pass a slice of an array into functions
+        test_input_array_type=test_input_array_type)
+end
 function test_implicit_collisions(;
     # initial pdf info
     vth0=0.5::mk_float, vperp0=1.0::mk_float, vpa0=0.0::mk_float, zbeam=0.0::mk_float,
