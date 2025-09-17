@@ -37,6 +37,8 @@ export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 export calculate_entropy_production
 # implicit advance
 export fokker_planck_collisions_backward_euler_step!
+# fixed background plasma inputs
+export fixed_background_plasma_input
 
 using Dates
 using LinearAlgebra: lu, ldiv!
@@ -53,7 +55,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
                                 conserving_corrections!, density_conserving_correction!,
                                 species_info, calculate_cross_species_rosenbluth_potential_sums!,
-                                multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
+                                multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species,
+                                fixed_background_plasma_input
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -156,11 +159,13 @@ function fokker_planck_collision_operator_weak_form!(
         # species species' pair of collison operators using finite-element integrals
         # storage for summed potentials
         rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
+        fixed_background_plasma = fkpl_arrays.fixed_background_plasma
         # for each species, sum up the Rosenbluth potentials to make the appropriate
         # total Rosenbluth potential, and assemble the collision operator
         for is in 1:species.n
             calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    rosenbluth_potentials_s,species,is)
+                    rosenbluth_potentials_s,species,species.zeds[is],species.mass[is],
+                    fixed_background_plasma)
             # assemble weak form and solve mass matrix problem for CCssp
             @views fokker_planck_collision_operator_solve!(
                          CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials, 1.0, 1.0, nuref,

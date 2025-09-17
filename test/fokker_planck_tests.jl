@@ -16,7 +16,7 @@ using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansi
                                             repeat_assembly_per_species, single_assembly_per_species
 
 using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
-using FokkerPlanck: conserving_corrections!, species_info
+using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
 using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 using FokkerPlanck: fokker_planck_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
@@ -93,7 +93,7 @@ function backward_Euler_linearised_collisions_test(;
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
     species = species_info([ms],[1.0])
     fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
-                        0.0, 0.0, 0, print_to_screen)
+                        0.0, 0.0, 0, print_to_screen, nothing)
     dummy_array = allocate_float(vpa.n,vperp.n)
     FMaxwell = allocate_float(vpa.n,vperp.n)
     FMaxwell_err = allocate_float(vpa.n,vperp.n)
@@ -234,7 +234,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     nl_solver_nonlinear_max_iterations=20
     fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
                         nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
-                        print_to_screen)
+                        print_to_screen,nothing)
 
     # initial condition
     Fold = allocate_float(vpa.n,vperp.n,species.n)
@@ -670,6 +670,119 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
     end
     return nothing
 end
+
+function slowing_down_fokker_planck_collisions_test(;
+    ngrid = 9,
+    nelement_vpa = 16,
+    nelement_vperp = 8,
+    pdf_input=false,
+    print_to_screen=false)
+    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                Lvpa=12.0,Lvperp=6.0,bc_vpa=natural_boundary_condition,
+                                bc_vperp=natural_boundary_condition)
+    boundary_data_option=multipole_expansion
+    species = species_info([1.0], # mass of evolved species
+                            [2.0]) # Z of evolved species
+    nuref = 1.0/16.0 # reference collision frequency
+    # parameters of fixed background species
+    msp = [1.0,0.2]#[0.25, 0.25/1836.0]
+    Zsp = [1.0,1.0]#[0.5, 0.5]
+    denssp = [1.0,1.0]#[1.0, 1.0]
+    uparsp = [0.0,0.0]#[0.0, 0.0]
+    vthsp = [sqrt(0.5/msp[1]), sqrt(0.5/msp[2])]#[sqrt(0.01/msp[1]), sqrt(0.01/msp[2])]
+    if pdf_input
+        nsprime = length(msp)
+        Fsp_M = allocate_float(vpa.n,vperp.n,nsprime)
+        for isp in 1:nsprime
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa,vperp,ivpa,ivperp)
+                end
+            end
+        end
+        fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,Fsp_M)
+    else
+        fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,denssp,uparsp,vthsp)
+    end
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                            print_to_screen=print_to_screen,
+                            fixed_background_plasma_in=fixed_background_plasma_in)
+
+    @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms pdf_input=$(pdf_input)" for test_numerical_conserving_terms in (true,false)
+        println("        - test_numerical_conserving_terms=$test_numerical_conserving_terms pdf_input=$(pdf_input)")
+        dummy_array = allocate_float(vpa.n,vperp.n)
+        Fs_M = allocate_float(vpa.n,vperp.n,species.n)
+        C_M_num = allocate_float(vpa.n,vperp.n,species.n)
+        C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
+        C_M_err = allocate_float(vpa.n,vperp.n)
+
+        # pick a set of parameters that represent slowing down
+        # on slow ions and faster electrons, but which are close
+        # enough to 1 for errors comparable to the self-collision operator
+        # increasing or reducing vth, mass increases the errors
+        dens, upar, vth = [1.0], [1.0], [1.0]
+        nsprime = size(msp,1)
+
+        for is in 1:species.n
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    Fs_M[ivpa,ivperp,is] = F_Maxwellian(dens[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                    C_M_exact[ivpa,ivperp,is] = 0.0
+                end
+            end
+        end
+        for is in 1:species.n
+            ms = species.mass[is]
+            Zs = species.zeds[is]
+            # sum up contributions from evolved species
+            for isp in 1:species.n
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                            C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
+                                                                        dens[isp],upar[isp],vth[isp],species.mass[isp],species.zeds[isp],
+                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                    end
+                end
+            end
+            # sum up contributions to cross-collision operator from fixed background
+            for isp in 1:nsprime
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                            C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
+                                                                        denssp[isp],uparsp[isp],vthsp[isp],msp[isp],Zsp[isp],
+                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                    end
+                end
+            end
+        end
+        fokker_planck_collision_operator_weak_form!(
+                    C_M_num,Fs_M,nuref,fkpl_arrays;
+                    use_conserving_corrections=test_numerical_conserving_terms)
+        for is in 1:species.n
+            @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+            atol_max = 5.0e-6
+            atol_L2 = 5.0e-8
+            @test C_M_max < atol_max
+            @test C_M_L2 < atol_L2
+            if !test_numerical_conserving_terms
+                @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
+                rtol, atol = 0.0, 1.0e-12
+                @test isapprox(delta_n, rtol ; atol=atol)
+                if print_to_screen
+                    println("delta_n: ", delta_n)
+                end
+            elseif test_numerical_conserving_terms
+                @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
+                rtol, atol = 0.0, 3.0e-14
+                @test isapprox(delta_n, rtol ; atol=atol)
+                if print_to_screen
+                    println("delta_n: ", delta_n)
+                end
+            end
+        end
+    end
+    return nothing
+end
 function runtests()
     print_to_screen = false
     @testset "Fokker Planck tests" begin
@@ -1086,83 +1199,8 @@ function runtests()
 
         @testset "weak-form (slowing-down) collision operator calculation" begin
             println("    - test weak-form (slowing-down) collision operator calculation")
-            ngrid = 5
-            nelement_vpa = 16
-            nelement_vperp = 8
-            vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                                Lvpa=12.0,Lvperp=6.0)
-            boundary_data_option=multipole_expansion
-            species = species_info([1.0],[1.0])
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
-                                    print_to_screen=print_to_screen)
-
-            @testset "slowing_down_test=true test_numerical_conserving_terms=$test_numerical_conserving_terms" for test_numerical_conserving_terms in (true,false)
-
-                dummy_array = allocate_float(vpa.n,vperp.n)
-                Fs_M = allocate_float(vpa.n,vperp.n)
-                F_M = allocate_float(vpa.n,vperp.n)
-                C_M_num = allocate_float(vpa.n,vperp.n)
-                C_M_exact = allocate_float(vpa.n,vperp.n)
-                C_M_err = allocate_float(vpa.n,vperp.n)
-
-                # pick a set of parameters that represent slowing down
-                # on slow ions and faster electrons, but which are close
-                # enough to 1 for errors comparable to the self-collision operator
-                # increasing or reducing vth, mass increases the errors
-                dens, upar, vth = 1.0, 1.0, 1.0
-                mref = 1.0 # mass of reference species, here the evolved species
-                Zref = 2.0 # Z of reference species
-                msp = [1.0,0.2]#[0.25, 0.25/1836.0]
-                Zsp = [1.0,1.0]#[0.5, 0.5]
-                denssp = [1.0,1.0]#[1.0, 1.0]
-                uparsp = [0.0,0.0]#[0.0, 0.0]
-                vthsp = [sqrt(0.5/msp[1]), sqrt(0.5/msp[2])]#[sqrt(0.01/msp[1]), sqrt(0.01/msp[2])]
-                nsprime = size(msp,1)
-                nuref = 1.0/16.0
-
-                for ivperp in 1:vperp.n
-                    for ivpa in 1:vpa.n
-                        Fs_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        C_M_exact[ivpa,ivperp] = 0.0
-                    end
-                end
-                # sum up contributions to cross-collision operator
-                for isp in 1:nsprime
-                    nussp = nuref
-                    for ivperp in 1:vperp.n
-                        for ivpa in 1:vpa.n
-                            C_M_exact[ivpa,ivperp] += Cssp_Maxwellian_inputs(dens,upar,vth,mref,Zref,
-                                                                            denssp[isp],uparsp[isp],vthsp[isp],msp[isp],Zsp[isp],
-                                                                            nussp,vpa,vperp,ivpa,ivperp)
-                        end
-                    end
-                end
-                fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(C_M_num,Fs_M,
-                                     nuref,mref,Zref,msp,Zsp,denssp,uparsp,vthsp,
-                                     fkpl_arrays;
-                                     use_conserving_corrections=test_numerical_conserving_terms)
-                C_M_max, C_M_L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                atol_max = 1.0e-3
-                atol_L2 = 2.0e-5
-                @test C_M_max < atol_max
-                @test C_M_L2 < atol_L2
-                if !test_numerical_conserving_terms
-                    delta_n = get_density(C_M_num, vpa, vperp)
-                    rtol, atol = 0.0, 1.0e-12
-                    @test isapprox(delta_n, rtol ; atol=atol)
-                    if print_to_screen
-                        println("delta_n: ", delta_n)
-                    end
-                elseif test_numerical_conserving_terms
-                    delta_n = get_density(C_M_num, vpa, vperp)
-                    rtol, atol = 0.0, 1.0e-15
-                    @test isapprox(delta_n, rtol ; atol=atol)
-                    if print_to_screen
-                        println("delta_n: ", delta_n)
-                    end
-                end
-            end
-
+            slowing_down_fokker_planck_collisions_test(; pdf_input=false)
+            slowing_down_fokker_planck_collisions_test(; pdf_input=true)
         end
 
         @testset "weak-form (multi-species) collision operator calculation" begin
