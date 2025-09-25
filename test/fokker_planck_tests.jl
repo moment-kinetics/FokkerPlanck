@@ -17,7 +17,6 @@ using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansi
 
 using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
-using FokkerPlanck: fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
 using FokkerPlanck: fokker_planck_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, F_Beam
