@@ -1,22 +1,25 @@
 """
-Module for including the Full-F Fokker-Planck Collision Operator.
+Package for computing the Full-F Fokker-Planck Collision Operator.
 
-The functions in this module are split into two groups.
+We implement the multi-species Collision operator
+using the Rosenbluth-MacDonald-Judd formulation in a divergence form.
+The Rosenbluth potentials are found using Poisson solvers
+with boundary data supplied either from multipole expansions
+or direct integration of the Rosenbluth potential definitions.
+Higher-order finite element methods are used, with a projection
+onto a weak-form using a nodal basis.
+Results are returned evaluated on collocation points.
 
-The first set of functions implement the weak-form
-Collision operator using the Rosenbluth-MacDonald-Judd
-formulation in a divergence form. The Green's functions
-for the Rosenbluth potentials are used to obtain the Rosenbluth
-potentials at the boundaries. To find the potentials
-everywhere else elliptic solves of the PDEs for the
-Rosenbluth potentials are performed with Dirichlet
-boundary conditions. These routines provide the default collision operator
-used in the code.
+An implicit backward Euler solver with time-lagged preconditioner
+is provided for testing purposes.
 
-The second set of functions are used to set up the necessary arrays to
-compute the Rosenbluth potentials everywhere in vpa, vperp
-by direct integration of the Green's functions. These functions are
-supported for the purposes of testing and debugging.
+Documentation of methods can be found in the following publication.
+
+M.R. Hardman, M. Abazorius, J. Omotani, M. Barnes, S.L. Newton, J.W.S. Cook, P.E. Farrell, F.I. Parra,
+A higher-order finite-element implementation of the nonlinear Fokker--Planck collision operator for charged particle collisions in a low density plasma,
+Computer Physics Communications, Volume 314, 2025, 109675,
+https://doi.org/10.1016/j.cpc.2025.109675
+
 """
 module FokkerPlanck
 
@@ -33,10 +36,12 @@ include("fokker_planck_nonlinear_solvers.jl")
 include("fokker_planck_calculus.jl")
 
 export fokker_planck_collision_operator_weak_form!
-export fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!
+# entropy diagnostic
 export calculate_entropy_production
 # implicit advance
 export fokker_planck_collisions_backward_euler_step!
+# fixed background plasma inputs
+export fixed_background_plasma_input
 
 using Dates
 using LinearAlgebra: lu, ldiv!
@@ -53,7 +58,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
                                 conserving_corrections!, density_conserving_correction!,
                                 species_info, calculate_cross_species_rosenbluth_potential_sums!,
-                                multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
+                                multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species,
+                                fixed_background_plasma_input
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -156,11 +162,13 @@ function fokker_planck_collision_operator_weak_form!(
         # species species' pair of collison operators using finite-element integrals
         # storage for summed potentials
         rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
+        fixed_background_plasma = fkpl_arrays.fixed_background_plasma
         # for each species, sum up the Rosenbluth potentials to make the appropriate
         # total Rosenbluth potential, and assemble the collision operator
         for is in 1:species.n
             calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    rosenbluth_potentials_s,species,is)
+                    rosenbluth_potentials_s,species,species.zeds[is],species.mass[is],
+                    fixed_background_plasma)
             # assemble weak form and solve mass matrix problem for CCssp
             @views fokker_planck_collision_operator_solve!(
                          CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials, 1.0, 1.0, nuref,
@@ -200,6 +208,16 @@ function fokker_planck_collision_operator_weak_form!(
                 # sum up the collision operator contributions
                 @. CCs[:,:,is] += Cssp
             end
+            # cross-species contributions from fixed background
+            @views fokker_planck_cross_species_collision_operator!(
+                        Cssp,
+                        ff_in[:,:,is],
+                        nuref, mass[is], zeds[is],
+                        fkpl_arrays.rosenbluth_potentials,
+                        fkpl_arrays.fixed_background_plasma,
+                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
+                        use_conserving_corrections=use_conserving_corrections)
+            @views CCs[:,:,is] += Cssp
         end
     end
     if use_conserving_corrections
@@ -209,107 +227,30 @@ function fokker_planck_collision_operator_weak_form!(
     return nothing
 end
 
-
-
-function fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(
+"""
+Cross-species collisions due to fixed background plasma.
+"""
+function fokker_planck_cross_species_collision_operator!(
                         CC::AbstractArray{mk_float,2},
-                        ffs_in::AbstractArray{mk_float,2},
+                        ff_in::AbstractArray{mk_float,2},
                         nuref::mk_float, ms::mk_float, Zs::mk_float,
-                        msp::Array{mk_float,1}, Zsp::Array{mk_float,1},
-                        densp::Array{mk_float,1}, uparsp::Array{mk_float,1},
-                        vthsp::Array{mk_float,1},
-                        fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                        rosenbluth_potentials,
+                        fixed_background_plasma,
+                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
                         use_conserving_corrections=true::Bool)
-
-    fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(
-        CC,ffs_in,
-        nuref,ms,Zs,msp,Zsp,densp,uparsp,vthsp,
-        fkpl_arrays)
+    # calculate the Rosenbluth potentials due to the background plasma
+    calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
+                    Zs,ms,fixed_background_plasma)
+    # assemble weak form, solve mass matrix for CC at collocation points
+    fokker_planck_collision_operator_solve!(
+                    CC, ff_in, rosenbluth_potentials, 1.0, 1.0, nuref,
+                    rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
     if use_conserving_corrections
-        vpa = fkpl_arrays.vpa
-        vperp = fkpl_arrays.vperp
         # enforce the boundary conditions on CC before it is used for timestepping
         enforce_vpavperp_BCs!(CC,vpa,vperp)
         # make ad-hoc conserving corrections
-        density_conserving_correction!(CC,ffs_in,vpa,vperp)
+        density_conserving_correction!(CC,ff_in,vpa,vperp)
     end
-    return nothing
-end
-
-"""
-Function for computing the collision operator
-```math
-\\sum_{s^\\prime} C[F_{s},F_{s^\\prime}]
-```
-when \$F_{s^\\prime}\$
-is an analytically specified Maxwellian distribution and
-the corresponding Rosenbluth potentials
-are specified using analytical results.
-"""
-function fokker_planck_collision_operator_weak_form_Maxwellian_Fsp!(CC::AbstractArray{mk_float,2},
-                         ffs_in::AbstractArray{mk_float,2},
-                         nuref::mk_float, ms::mk_float, Zs::mk_float,
-                         msp::Array{mk_float,1}, Zsp::Array{mk_float,1},
-                         densp::Array{mk_float,1}, uparsp::Array{mk_float,1},
-                         vthsp::Array{mk_float,1},
-                         fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    @boundscheck vpa.n == size(ffs_in,1) || throw(BoundsError(ffs_in))
-    @boundscheck vperp.n == size(ffs_in,2) || throw(BoundsError(ffs_in))
-
-    # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
-    lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
-    YY_arrays = fkpl_arrays.YY_arrays
-    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
-    dHdvpa = rosenbluth_potentials.dHdvpa
-    dHdvperp = rosenbluth_potentials.dHdvperp
-    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
-    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
-    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
-
-    # number of primed species
-    nsp = size(msp,1)
-
-    # first set dummy arrays for coefficients to zero
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                d2Gdvpa2[ivpa,ivperp] = 0.0
-                d2Gdvperp2[ivpa,ivperp] = 0.0
-                d2Gdvperpdvpa[ivpa,ivperp] = 0.0
-                dHdvpa[ivpa,ivperp] = 0.0
-                dHdvperp[ivpa,ivperp] = 0.0
-            end
-        end
-    end
-    # sum the contributions from the potentials, including order unity factors that differ between species
-    # making use of the Linearity of the operator in Fsp
-    # note that here we absorb ms/msp and Zsp^2 into the definition of the potentials, and we pass
-    # ms = msp = 1 to the collision operator assembly routine so that we can use a single array to include
-    # the contribution to the summed Rosenbluth potential from all the species
-    for isp in 1:nsp
-        dens = densp[isp]
-        upar = uparsp[isp]
-        vth = vthsp[isp]
-        ZZ = (Zsp[isp]*Zs/ms)^2 # factor from gamma_ss'/m_s^2 = Z_s^2 Z_s'^2 / m_s^2
-        @inbounds begin
-            for ivperp in 1:vperp.n
-                for ivpa in 1:vpa.n
-                    d2Gdvpa2[ivpa,ivperp] += ZZ*d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperp2[ivpa,ivperp] += ZZ*d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperpdvpa[ivpa,ivperp] += ZZ*d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvpa[ivpa,ivperp] += ZZ*(ms/msp[isp])*dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvperp[ivpa,ivperp] += ZZ*(ms/msp[isp])*dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                end
-            end
-        end
-    end
-    # assemble weak form and solve mass matrix problem for Cs
-    @views fokker_planck_collision_operator_solve!(
-                         CC, ffs_in, rosenbluth_potentials, 1.0, 1.0, nuref,
-                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
     return nothing
 end
 

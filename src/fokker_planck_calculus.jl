@@ -28,6 +28,7 @@ export matrix_inverse
 export multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 export calculate_collision_moments!
 export fokker_planck_collision_operator_solve!
+export fixed_background_plasma_input
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
@@ -760,7 +761,7 @@ struct species_info
     """
     Internal constructor for `species_info`.
     """
-    function species_info(mass,zeds)
+    function species_info(mass::Vector{mk_float},zeds::Vector{mk_float})
         # number of species
         nspecies = length(zeds)
         # check inputs are consistent
@@ -775,6 +776,91 @@ struct species_info
     end
 end
 
+
+"""
+"""
+struct pdf_moments
+    density::Vector{mk_float}
+    upar::Vector{mk_float}
+    vth::Vector{mk_float}
+end
+"""
+"""
+struct fixed_background_plasma_input
+    species::species_info
+    pdf::Union{pdf_moments,AbstractArray{mk_float,3}}
+    function fixed_background_plasma_input(mass::Vector{mk_float},
+                                    zeds::Vector{mk_float},
+                                    pdf::Union{pdf_moments,AbstractArray{mk_float,3}})
+        species = species_info(mass,zeds)
+        return new(species,pdf)
+    end
+    function fixed_background_plasma_input(mass::Vector{mk_float},
+                                    zeds::Vector{mk_float},
+                                    density::Vector{mk_float},
+                                    upar::Vector{mk_float},
+                                    vth::Vector{mk_float})
+        species = species_info(mass,zeds)
+        pdf = pdf_moments(density,upar,vth)
+        return new(species,pdf)
+    end
+end
+"""
+"""
+struct fixed_background_plasma_info
+    species::species_info
+    rosenbluth_potentials_s::Vector{rosenbluth_potential_data}
+    # internal constructor for Maxwellian background plasma species
+    function fixed_background_plasma_info(fixed_background_plasma_in::fixed_background_plasma_input,
+                                    vpa::finite_element_coordinate,
+                                    vperp::finite_element_coordinate,
+                                    fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data)
+        species = fixed_background_plasma_in.species
+        pdf = fixed_background_plasma_in.pdf
+        return fixed_background_plasma_info(species, pdf, vpa, vperp, fprp_solver_data)
+    end
+    function fixed_background_plasma_info(species::species_info,
+                                    pdf::pdf_moments,
+                                    vpa::finite_element_coordinate,
+                                    vperp::finite_element_coordinate,
+                                    # unused input kept to permit the same interface
+                                    fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data)
+        density = pdf.density
+        upar = pdf.upar
+        vth = pdf.vth
+        @boundscheck species.n == length(density) || throw(BoundsError(density))
+        @boundscheck species.n == length(upar) || throw(BoundsError(upar))
+        @boundscheck species.n == length(vth) || throw(BoundsError(vth))
+        rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
+        for is in 1:species.n
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+        end
+        for is in 1:species.n
+            calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+                rosenbluth_potentials_s[is],density[is],upar[is],vth[is],vpa,vperp)
+        end
+        return new(species, rosenbluth_potentials_s)
+    end
+    # internal constructor for non-Maxwellian background plasma species
+    function fixed_background_plasma_info(species::species_info,
+                                    pdf::AbstractArray{mk_float,3},
+                                    vpa::finite_element_coordinate,
+                                    vperp::finite_element_coordinate,
+                                    fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data)
+        @boundscheck (species.n == size(pdf,3) && vperp.n == size(pdf,2) && vpa.n == size(pdf,1)) || throw(BoundsError(pdf))
+        rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
+        for is in 1:species.n
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+        end
+        for is in 1:species.n
+            @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],pdf[:,:,is],
+             vpa,vperp,fprp_solver_data,species.mass[is],
+             algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
+             calculate_dGdvperp=false)
+        end
+        return new(species, rosenbluth_potentials_s)
+    end
+end
 """
 Struct of dummy arrays and precalculated coefficients
 for the finite-element weak-form Fokker-Planck collision operator.
@@ -813,6 +899,8 @@ struct fokkerplanck_weakform_arrays_struct
     delta_pdf::Array{mk_float,3}
     # option to control which numerical error corrections method to use
     multi_species_operator_option::multi_species_operator_type
+    # data needed to include contributions from unevolved plasma species
+    fixed_background_plasma::Union{fixed_background_plasma_info,Nothing}
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
@@ -824,7 +912,8 @@ struct fokkerplanck_weakform_arrays_struct
                                                 species::species_info,
                                                 boundary_data_option::boundary_data_type;
                                                 multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-                                                print_to_screen=true::Bool)
+                                                print_to_screen=true::Bool,
+                                                fixed_background_plasma_in=nothing::Union{fixed_background_plasma_input,Nothing})
         YY_arrays = YY_collision_operator_arrays(vpa,vperp)
         fprp_solver_data = fokkerplanck_rosenbluth_potential_solver_data(vpa,vperp,
                                 YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
@@ -850,12 +939,19 @@ struct fokkerplanck_weakform_arrays_struct
         delta_E = allocate_float(nspecies)
         correction_coeffs_z = allocate_float(3,nspecies,nspecies)
         delta_pdf = allocate_float(nvpa,nvperp,nspecies)
+        # Rosenbluth potentials and species info for unevolved species
+        if typeof(fixed_background_plasma_in) == fixed_background_plasma_input
+            fixed_background_plasma = fixed_background_plasma_info(fixed_background_plasma_in,
+                                            vpa,vperp,fprp_solver_data)
+        else
+            fixed_background_plasma = nothing
+        end
         return new(vpa, vperp, species, fprp_solver_data, YY_arrays,
                     rosenbluth_potentials_s, rosenbluth_potentials,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
                     density, upar, pressure, ppar, qpar, rmom,
                     delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf,
-                    multi_species_operator_option)
+                    multi_species_operator_option, fixed_background_plasma)
     end
 end
 
@@ -906,8 +1002,8 @@ struct fokker_plack_backward_euler_data
         nl_solver_atol=1.0e-10::mk_float,
         nl_solver_rtol=0.0::mk_float,
         nl_solver_nonlinear_max_iterations=20::mk_int,
-        print_to_screen=true::Bool)
-
+        print_to_screen=true::Bool,
+        fixed_background_plasma_in=nothing::Union{fixed_background_plasma_input,Nothing})
         # create the coordinate structs from the input data
         vperp = finite_element_coordinate("vperp", inputs_vperp,
                                     bc=bc_vperp)
@@ -918,7 +1014,7 @@ struct fokker_plack_backward_euler_data
         return fokker_plack_backward_euler_data(vpa,vperp,species,
                     boundary_data_option,multi_species_operator_option,
                     nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
-                    print_to_screen)
+                    print_to_screen,fixed_background_plasma_in)
     end
     # constructor without optional arguments
     function fokker_plack_backward_euler_data(vpa::finite_element_coordinate,
@@ -929,7 +1025,8 @@ struct fokker_plack_backward_euler_data
                                     nl_solver_atol::mk_float,
                                     nl_solver_rtol::mk_float,
                                     nl_solver_nonlinear_max_iterations::mk_int,
-                                    print_to_screen::Bool)
+                                    print_to_screen::Bool,
+                                    fixed_background_plasma_in::Union{fixed_background_plasma_input,Nothing})
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         # collision operator arrays for intermediate results
         CCs = allocate_float(nvpa,nvperp,nspecies)
@@ -954,7 +1051,8 @@ struct fokker_plack_backward_euler_data
         fp_operator = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,
                                                 boundary_data_option;
                                                 multi_species_operator_option=multi_species_operator_option,
-                                                print_to_screen=print_to_screen)
+                                                print_to_screen=print_to_screen,
+                                                fixed_background_plasma_in=fixed_background_plasma_in)
         return new(CCs,
             CC2D_sparse,CC2D_sparse_constructor,lu_obj_CC2D,
             lu_objs_CC2D,
@@ -2637,6 +2735,9 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     # dummy arrays for Rosenbluth potentials
     rosenbluth_potentials_s = fp_operator.rosenbluth_potentials_s
     rosenbluth_potentials = fp_operator.rosenbluth_potentials
+    # information about fixed background plasma
+    fixed_background_plasma = fp_operator.fixed_background_plasma
+    # compute potentials due to evolved species
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
@@ -2656,7 +2757,8 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
         for is in 1:species.n
             calculate_cross_species_rosenbluth_potential_sums!(
                     rosenbluth_potentials,rosenbluth_potentials_s,
-                    species,is)
+                    species,species.zeds[is],species.mass[is],
+                    fixed_background_plasma)
             assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
                 rosenbluth_potentials,delta_t,nuref,fp_operator)
             # should improve on this step to avoid recreating the sparse array if possible.
@@ -3245,6 +3347,18 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     rosenbluth_potentials::rosenbluth_potential_data,
     ffsp_in::AbstractArray{mk_float,2},vpa::finite_element_coordinate,
     vperp::finite_element_coordinate,mass::mk_float)
+    dens = get_density(ffsp_in, vpa, vperp)
+    upar = get_upar(ffsp_in, vpa, vperp, dens)
+    pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
+    vth = sqrt(2.0*pressure/(dens*mass))
+    calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+        rosenbluth_potentials,dens,upar,vth,vpa,vperp)
+    return nothing
+end
+function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+    rosenbluth_potentials::rosenbluth_potential_data,
+    dens::mk_float,upar::mk_float,vth::mk_float,
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate)
     GG = rosenbluth_potentials.GG
     HH = rosenbluth_potentials.HH
     dHdvpa = rosenbluth_potentials.dHdvpa
@@ -3253,10 +3367,6 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
     d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
     d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
-    dens = get_density(ffsp_in, vpa, vperp)
-    upar = get_upar(ffsp_in, vpa, vperp, dens)
-    pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
-    vth = sqrt(2.0*pressure/(dens*mass))
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -3352,8 +3462,70 @@ end
 """
 function calculate_cross_species_rosenbluth_potential_sums!(
                 rosenbluth_potentials::rosenbluth_potential_data,
+                Zs::mk_float,ms::mk_float,
+                fixed_background_plasma::Union{Nothing,fixed_background_plasma_info})
+    calculate_cross_species_rosenbluth_potential_sums!(
+                rosenbluth_potentials,
+                nothing, nothing,Zs::mk_float,ms::mk_float,
+                fixed_background_plasma)
+    return nothing
+end
+function calculate_cross_species_rosenbluth_potential_sums!(
+                rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Union{Nothing,Vector{rosenbluth_potential_data}},
+                species::Union{Nothing,species_info},Zs::mk_float,ms::mk_float,
+                fixed_background_plasma::Union{Nothing,fixed_background_plasma_info})
+    # zero Rosenbluth potentials before summation
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    d2Gdvpa2 .= 0.0
+    d2Gdvperpdvpa .= 0.0
+    d2Gdvperp2 .= 0.0
+    dHdvpa .= 0.0
+    dHdvperp .= 0.0
+    # sum potentials from the evolved species
+    sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials,
+                rosenbluth_potentials_s,
+                species,Zs,ms)
+    # sum potentials from the fixed (unevolved) species
+    sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials,
+                fixed_background_plasma,Zs,ms)
+    return nothing
+end
+function sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials::rosenbluth_potential_data,
+                fixed_background_plasma::fixed_background_plasma_info,
+                Zs::mk_float,ms::mk_float)
+    sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials,
+                fixed_background_plasma.rosenbluth_potentials_s,
+                fixed_background_plasma.species,Zs,ms)
+    return nothing
+end
+function sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials::rosenbluth_potential_data,
+                fixed_background_plasma::Nothing,
+                Zs::mk_float,ms::mk_float)
+    # do nothing
+    return nothing
+end
+function sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Nothing,
+                species::Nothing,
+                Zs::mk_float,ms::mk_float)
+    # do nothing
+    return nothing
+end
+function sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials::rosenbluth_potential_data,
                 rosenbluth_potentials_s::Vector{rosenbluth_potential_data},
-                species,is::mk_int)
+                species::species_info,Zs::mk_float,ms::mk_float)
     dHdvpa = rosenbluth_potentials.dHdvpa
     dHdvperp = rosenbluth_potentials.dHdvperp
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
@@ -3361,18 +3533,15 @@ function calculate_cross_species_rosenbluth_potential_sums!(
     d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     mass = species.mass
     zeds = species.zeds
-    d2Gdvpa2 .= 0.0
-    d2Gdvperpdvpa .= 0.0
-    d2Gdvperp2 .= 0.0
-    dHdvpa .= 0.0
-    dHdvperp .= 0.0
     for isp in 1:species.n
         # struct for Rosenbluth potentials for species s'
         rp = rosenbluth_potentials_s[isp]
+        Zsp = zeds[isp]
+        msp = mass[isp]
         # add the contribution from species s' to the total
         # note that Coulomb logarithm factors are missing
-        G_factor = (zeds[is]*zeds[isp]/mass[is])^2
-        H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
+        G_factor = (Zs*Zsp/ms)^2
+        H_factor = ((Zs*Zsp)^2)/(ms*msp)
         @. d2Gdvpa2 += rp.d2Gdvpa2*G_factor
         @. d2Gdvperpdvpa += rp.d2Gdvperpdvpa*G_factor
         @. d2Gdvperp2 += rp.d2Gdvperp2*G_factor
