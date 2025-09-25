@@ -1,22 +1,25 @@
 """
-Module for including the Full-F Fokker-Planck Collision Operator.
+Package for computing the Full-F Fokker-Planck Collision Operator.
 
-The functions in this module are split into two groups.
+We implement the multi-species Collision operator
+using the Rosenbluth-MacDonald-Judd formulation in a divergence form.
+The Rosenbluth potentials are found using Poisson solvers
+with boundary data supplied either from multipole expansions
+or direct integration of the Rosenbluth potential definitions.
+Higher-order finite element methods are used, with a projection
+onto a weak-form using a nodal basis.
+Results are returned evaluated on collocation points.
 
-The first set of functions implement the weak-form
-Collision operator using the Rosenbluth-MacDonald-Judd
-formulation in a divergence form. The Green's functions
-for the Rosenbluth potentials are used to obtain the Rosenbluth
-potentials at the boundaries. To find the potentials
-everywhere else elliptic solves of the PDEs for the
-Rosenbluth potentials are performed with Dirichlet
-boundary conditions. These routines provide the default collision operator
-used in the code.
+An implicit backward Euler solver with time-lagged preconditioner
+is provided for testing purposes.
 
-The second set of functions are used to set up the necessary arrays to
-compute the Rosenbluth potentials everywhere in vpa, vperp
-by direct integration of the Green's functions. These functions are
-supported for the purposes of testing and debugging.
+Documentation of methods can be found in the following publication.
+
+M.R. Hardman, M. Abazorius, J. Omotani, M. Barnes, S.L. Newton, J.W.S. Cook, P.E. Farrell, F.I. Parra,
+A higher-order finite-element implementation of the nonlinear Fokker--Planck collision operator for charged particle collisions in a low density plasma,
+Computer Physics Communications, Volume 314, 2025, 109675,
+https://doi.org/10.1016/j.cpc.2025.109675
+
 """
 module FokkerPlanck
 
