@@ -205,6 +205,16 @@ function fokker_planck_collision_operator_weak_form!(
                 # sum up the collision operator contributions
                 @. CCs[:,:,is] += Cssp
             end
+            # cross-species contributions from fixed background
+            @views fokker_planck_cross_species_collision_operator!(
+                        Cssp,
+                        ff_in[:,:,is],
+                        nuref, mass[is], zeds[is],
+                        fkpl_arrays.rosenbluth_potentials,
+                        fkpl_arrays.fixed_background_plasma,
+                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
+                        use_conserving_corrections=use_conserving_corrections)
+            @views CCs[:,:,is] += Cssp
         end
     end
     if use_conserving_corrections
@@ -214,8 +224,32 @@ function fokker_planck_collision_operator_weak_form!(
     return nothing
 end
 
-
-
+"""
+Cross-species collisions due to fixed background plasma
+"""
+function fokker_planck_cross_species_collision_operator!(
+                        CC::AbstractArray{mk_float,2},
+                        ff_in::AbstractArray{mk_float,2},
+                        nuref::mk_float, ms::mk_float, Zs::mk_float,
+                        rosenbluth_potentials,
+                        fixed_background_plasma,
+                        rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
+                        use_conserving_corrections=true::Bool)
+    # calculate the Rosenbluth potentials due to the background plasma
+    calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
+                    Zs,ms,fixed_background_plasma)
+    # assemble weak form, solve mass matrix for CC at collocation points
+    fokker_planck_collision_operator_solve!(
+                    CC, ff_in, rosenbluth_potentials, 1.0, 1.0, nuref,
+                    rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
+    if use_conserving_corrections
+        # enforce the boundary conditions on CC before it is used for timestepping
+        enforce_vpavperp_BCs!(CC,vpa,vperp)
+        # make ad-hoc conserving corrections
+        density_conserving_correction!(CC,ff_in,vpa,vperp)
+    end
+    return nothing
+end
 function fokker_planck_cross_species_collision_operator_Maxwellian_Fsp!(
                         CC::AbstractArray{mk_float,2},
                         ffs_in::AbstractArray{mk_float,2},

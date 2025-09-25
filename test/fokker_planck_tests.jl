@@ -675,11 +675,12 @@ function slowing_down_fokker_planck_collisions_test(;
     ngrid = 9,
     nelement_vpa = 16,
     nelement_vperp = 8,
-    pdf_input=false,
+    bc = natural_boundary_condition,
+    multi_species_operator_option = single_assembly_per_species,
     print_to_screen=false)
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                Lvpa=12.0,Lvperp=6.0,bc_vpa=natural_boundary_condition,
-                                bc_vperp=natural_boundary_condition)
+                                Lvpa=12.0,Lvperp=6.0,bc_vpa=bc,
+                                bc_vperp=bc)
     boundary_data_option=multipole_expansion
     species = species_info([1.0], # mass of evolved species
                             [2.0]) # Z of evolved species
@@ -690,26 +691,27 @@ function slowing_down_fokker_planck_collisions_test(;
     denssp = [1.0,1.0]#[1.0, 1.0]
     uparsp = [0.0,0.0]#[0.0, 0.0]
     vthsp = [sqrt(0.5/msp[1]), sqrt(0.5/msp[2])]#[sqrt(0.01/msp[1]), sqrt(0.01/msp[2])]
-    if pdf_input
-        nsprime = length(msp)
-        Fsp_M = allocate_float(vpa.n,vperp.n,nsprime)
-        for isp in 1:nsprime
-            for ivperp in 1:vperp.n
-                for ivpa in 1:vpa.n
-                    Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa,vperp,ivpa,ivperp)
+
+    @testset "multi_species_operator_option=$multi_species_operator_option bc=$bc pdf_input=$(pdf_input)" for pdf_input in (true,false)
+        println("        - multi_species_operator_option=$multi_species_operator_option bc=$bc pdf_input=$pdf_input")
+        if pdf_input
+            nsprime = length(msp)
+            Fsp_M = allocate_float(vpa.n,vperp.n,nsprime)
+            for isp in 1:nsprime
+                for ivperp in 1:vperp.n
+                    for ivpa in 1:vpa.n
+                        Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa,vperp,ivpa,ivperp)
+                    end
                 end
             end
+            fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,Fsp_M)
+        else
+            fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,denssp,uparsp,vthsp)
         end
-        fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,Fsp_M)
-    else
-        fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,denssp,uparsp,vthsp)
-    end
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
-                            print_to_screen=print_to_screen,
-                            fixed_background_plasma_in=fixed_background_plasma_in)
-
-    @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms pdf_input=$(pdf_input)" for test_numerical_conserving_terms in (true,false)
-        println("        - test_numerical_conserving_terms=$test_numerical_conserving_terms pdf_input=$(pdf_input)")
+        fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                multi_species_operator_option=multi_species_operator_option,
+                                print_to_screen=print_to_screen,
+                                fixed_background_plasma_in=fixed_background_plasma_in)
         dummy_array = allocate_float(vpa.n,vperp.n)
         Fs_M = allocate_float(vpa.n,vperp.n,species.n)
         C_M_num = allocate_float(vpa.n,vperp.n,species.n)
@@ -755,28 +757,31 @@ function slowing_down_fokker_planck_collisions_test(;
                 end
             end
         end
-        fokker_planck_collision_operator_weak_form!(
-                    C_M_num,Fs_M,nuref,fkpl_arrays;
-                    use_conserving_corrections=test_numerical_conserving_terms)
-        for is in 1:species.n
-            @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-            atol_max = 5.0e-6
-            atol_L2 = 5.0e-8
-            @test C_M_max < atol_max
-            @test C_M_L2 < atol_L2
-            if !test_numerical_conserving_terms
-                @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
-                rtol, atol = 0.0, 1.0e-12
-                @test isapprox(delta_n, rtol ; atol=atol)
-                if print_to_screen
-                    println("delta_n: ", delta_n)
-                end
-            elseif test_numerical_conserving_terms
-                @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
-                rtol, atol = 0.0, 3.0e-14
-                @test isapprox(delta_n, rtol ; atol=atol)
-                if print_to_screen
-                    println("delta_n: ", delta_n)
+        @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for test_numerical_conserving_terms in (true,false)
+            println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
+            fokker_planck_collision_operator_weak_form!(
+                        C_M_num,Fs_M,nuref,fkpl_arrays;
+                        use_conserving_corrections=test_numerical_conserving_terms)
+            for is in 1:species.n
+                @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+                atol_max = 5.0e-6
+                atol_L2 = 5.0e-8
+                @test C_M_max < atol_max
+                @test C_M_L2 < atol_L2
+                if !test_numerical_conserving_terms
+                    @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
+                    rtol, atol = 0.0, 1.0e-12
+                    @test isapprox(delta_n, rtol ; atol=atol)
+                    if print_to_screen
+                        println("delta_n: ", delta_n)
+                    end
+                elseif test_numerical_conserving_terms
+                    @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
+                    rtol, atol = 0.0, 3.0e-14
+                    @test isapprox(delta_n, rtol ; atol=atol)
+                    if print_to_screen
+                        println("delta_n: ", delta_n)
+                    end
                 end
             end
         end
@@ -1199,8 +1204,12 @@ function runtests()
 
         @testset "weak-form (slowing-down) collision operator calculation" begin
             println("    - test weak-form (slowing-down) collision operator calculation")
-            slowing_down_fokker_planck_collisions_test(; pdf_input=false)
-            slowing_down_fokker_planck_collisions_test(; pdf_input=true)
+            slowing_down_fokker_planck_collisions_test(;
+                bc = natural_boundary_condition,
+                multi_species_operator_option = single_assembly_per_species)
+            slowing_down_fokker_planck_collisions_test(;
+                bc = zero_boundary_condition,
+                multi_species_operator_option = repeat_assembly_per_species)
         end
 
         @testset "weak-form (multi-species) collision operator calculation" begin

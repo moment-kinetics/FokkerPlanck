@@ -3462,8 +3462,18 @@ end
 """
 function calculate_cross_species_rosenbluth_potential_sums!(
                 rosenbluth_potentials::rosenbluth_potential_data,
-                rosenbluth_potentials_s::Vector{rosenbluth_potential_data},
-                species,Zs::mk_float,ms::mk_float,
+                Zs::mk_float,ms::mk_float,
+                fixed_background_plasma::Union{Nothing,fixed_background_plasma_info})
+    calculate_cross_species_rosenbluth_potential_sums!(
+                rosenbluth_potentials,
+                nothing, nothing,Zs::mk_float,ms::mk_float,
+                fixed_background_plasma)
+    return nothing
+end
+function calculate_cross_species_rosenbluth_potential_sums!(
+                rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Union{Nothing,Vector{rosenbluth_potential_data}},
+                species::Union{Nothing,species_info},Zs::mk_float,ms::mk_float,
                 fixed_background_plasma::Union{Nothing,fixed_background_plasma_info})
     # zero Rosenbluth potentials before summation
     dHdvpa = rosenbluth_potentials.dHdvpa
@@ -3506,8 +3516,16 @@ function sum_cross_species_rosenbluth_potentials!(
 end
 function sum_cross_species_rosenbluth_potentials!(
                 rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Nothing,
+                species::Nothing,
+                Zs::mk_float,ms::mk_float)
+    # do nothing
+    return nothing
+end
+function sum_cross_species_rosenbluth_potentials!(
+                rosenbluth_potentials::rosenbluth_potential_data,
                 rosenbluth_potentials_s::Vector{rosenbluth_potential_data},
-                species,Zs::mk_float,ms::mk_float)
+                species::species_info,Zs::mk_float,ms::mk_float)
     dHdvpa = rosenbluth_potentials.dHdvpa
     dHdvperp = rosenbluth_potentials.dHdvperp
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
