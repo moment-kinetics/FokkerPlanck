@@ -7,39 +7,36 @@ the full-F Fokker-Planck collision operator.
 """
 module fokker_planck_calculus
 
-export assemble_matrix_operators_dirichlet_bc_sparse
 export assemble_explicit_collision_operator_rhs_serial!
-export YY_collision_operator_arrays
 export calculate_rosenbluth_potential_boundary_data!
 export calculate_rosenbluth_potential_boundary_data_multipole!
 export calculate_rosenbluth_potential_boundary_data_delta_f_multipole!
 export fokkerplanck_arrays_direct_integration_struct
 export fokkerplanck_weakform_arrays_struct
+export fokker_plack_backward_euler_data
 export enforce_vpavperp_BCs!
 export calculate_rosenbluth_potentials_via_elliptic_solve!
 export calculate_rosenbluth_potentials_via_analytical_Maxwellian!
-export allocate_preconditioner_matrix
 export calculate_test_particle_preconditioner!
 export advance_linearised_test_particle_collisions!
 export density_conserving_correction!, conserving_corrections!
 export species_info, calculate_cross_species_rosenbluth_potential_sums!
-# testing
-export calculate_rosenbluth_potential_boundary_data_exact!
-export allocate_rosenbluth_potential_boundary_data
 export calculate_rosenbluth_potential_boundary_data_exact!
 export test_rosenbluth_potential_boundary_data
 export interpolate_2D_vspace!
 export matrix_inverse
+export multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
+export calculate_collision_moments!
+export fokker_planck_collision_operator_solve!
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..calculus: integral
-using ..coordinates: first_derivative!, finite_element_coordinate,
+using ..coordinates: first_derivative!, finite_element_coordinate, scalar_coordinate_inputs,
                     finite_element_boundary_condition_type, zero_boundary_condition, natural_boundary_condition
 using ..velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using ..fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
-using ..fokker_planck_nonlinear_solvers: setup_fp_nl_solve
 using Dates
 using SpecialFunctions: ellipk, ellipe
 using SparseArrays: sparse, AbstractSparseArray
@@ -49,7 +46,8 @@ using FastGaussQuadrature
 using LagrangePolynomials: lagrange_poly
 using FiniteElementMatrices: lagrange_x,
                              d_lagrange_dx,
-                             finite_element_matrix
+                             finite_element_matrix,
+                             element_coordinates
 using JacobianFreeNewtonKrylov: nl_solver_info
 """
 Options for selecting which boundary data calculation to use
@@ -63,6 +61,14 @@ export boundary_data_type
 export direct_integration
 export multipole_expansion
 export delta_f_multipole
+
+"""
+Option for selecting conservative terms strategy
+"""
+@enum multi_species_operator_type begin
+    single_assembly_per_species
+    repeat_assembly_per_species
+end
 
 """
 Struct to contain data needed to create a sparse matrix.
@@ -170,7 +176,7 @@ struct fokkerplanck_arrays_direct_integration_struct
                                                         print_to_screen=false::Bool)
         nvpa = vpa.n
         nvperp = vperp.n
-        
+
         G0_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
         G1_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
         H0_weights = allocate_float(nvpa,nvperp,nvpa,nvperp)
@@ -242,7 +248,7 @@ struct fokkerplanck_boundary_integration_struct
     H3_weights::boundary_integration_weights_struct
     dfdvpa::Array{mk_float,2}
     d2fdvperpdvpa::Array{mk_float,2}
-    dfdvperp::Array{mk_float,2}     
+    dfdvperp::Array{mk_float,2}
     """
     Function to allocate at `fokkerplanck_boundary_integration_struct`.
     """
@@ -300,7 +306,7 @@ struct rosenbluth_potential_boundary_data
     dGdvperp_data::vpa_vperp_boundary_data
     d2Gdvperp2_data::vpa_vperp_boundary_data
     d2Gdvperpdvpa_data::vpa_vperp_boundary_data
-    d2Gdvpa2_data::vpa_vperp_boundary_data     
+    d2Gdvpa2_data::vpa_vperp_boundary_data
     """
     Function to allocate an instance of `rosenbluth_potential_boundary_data`.
     """
@@ -449,6 +455,298 @@ struct YY_collision_operator_arrays
     end
 end
 
+
+struct assembled_matrix_operators_sparse
+    # assembled 2D weak-form matrices
+    MM2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKpar2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KKperp2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LP2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LV2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    LB2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PPparPUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    PPpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    MMparMNperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    KPperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    # lu decomposition objects
+    lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LP::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LV::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_obj_LB::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    # dummy arrays for elliptic solvers
+    S_dummy::Array{mk_float,2}
+    Q_dummy::Array{mk_float,2}
+    rhsvpavperp::Array{mk_float,2}
+    """
+    Function to contruct the global sparse matrices used to solve
+    the elliptic PDEs for the Rosenbluth potentials. Uses a sparse matrix
+    construction method. The matrices are 2D in the compound index `ic`
+    which indexes the velocity space labelled by `ivpa,ivperp`.
+    Dirichlet boundary conditions are imposed in the appropriate stiffness
+    matrices by setting the boundary row to be the Kronecker delta
+    (0 except where `ivpa = ivpap` and `ivperp = ivperpp`).
+    """
+    function assembled_matrix_operators_sparse(vpa::finite_element_coordinate,
+                                                    vperp::finite_element_coordinate,
+                                                    YY_arrays::YY_collision_operator_arrays;
+                                                    print_to_screen=true)
+        # Assemble a 2D mass matrix in the global compound coordinate
+        nc_global = vpa.n*vperp.n
+        ntot_vpa = (vpa.nelement - 1)*(vpa.ngrid^2 - 1) + vpa.ngrid^2
+        ntot_vperp = (vperp.nelement - 1)*(vperp.ngrid^2 - 1) + vperp.ngrid^2
+        nsparse = ntot_vpa*ntot_vperp
+
+        MM2D = sparse_matrix_constructor(nsparse)
+        KKpar2D = sparse_matrix_constructor(nsparse)
+        KKperp2D = sparse_matrix_constructor(nsparse)
+        KKpar2D_with_BC_terms = sparse_matrix_constructor(nsparse)
+        KKperp2D_with_BC_terms = sparse_matrix_constructor(nsparse)
+        PUperp2D = sparse_matrix_constructor(nsparse)
+        PPparPUperp2D = sparse_matrix_constructor(nsparse)
+        PPpar2D = sparse_matrix_constructor(nsparse)
+        MMparMNperp2D = sparse_matrix_constructor(nsparse)
+        KPperp2D = sparse_matrix_constructor(nsparse)
+        # Laplacian matrix
+        LP2D = sparse_matrix_constructor(nsparse)
+        # Modified Laplacian matrix (for d / d vperp potentials)
+        LV2D = sparse_matrix_constructor(nsparse)
+        # Modified Laplacian matrix (for d^2 / d vperp^2 potentials)
+        LB2D = sparse_matrix_constructor(nsparse)
+
+        impose_BC_at_zero_vperp = false
+        if print_to_screen
+            println("begin elliptic operator assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
+        end
+        for ielement_vperp in 1:vperp.nelement
+            @views MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
+            @views MRperp = YY_arrays.MRperp[:,:,ielement_vperp]
+            @views MNperp = YY_arrays.MNperp[:,:,ielement_vperp]
+            @views KKperp = YY_arrays.KKperp[:,:,ielement_vperp]
+            @views KJperp = YY_arrays.KJperp[:,:,ielement_vperp]
+            @views PPperp = YY_arrays.PPperp[:,:,ielement_vperp]
+            @views PUperp = YY_arrays.PUperp[:,:,ielement_vperp]
+            @views KKperp_with_BC_terms = YY_arrays.KKperp_with_BC_terms[:,:,ielement_vperp]
+            for ielement_vpa in 1:vpa.nelement
+                @views MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
+                @views KKpar = YY_arrays.KKpar[:,:,ielement_vpa]
+                @views KKpar_with_BC_terms = YY_arrays.KKpar_with_BC_terms[:,:,ielement_vpa]
+                @views PPpar = YY_arrays.PPpar[:,:,ielement_vpa]
+                for ivperpp_local in 1:vperp.ngrid
+                    for ivperp_local in 1:vperp.ngrid
+                        for ivpap_local in 1:vpa.ngrid
+                            for ivpa_local in 1:vpa.ngrid
+                                ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                                icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpap_local,ivperpp_local) #get_indices(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivpap_local,ivperp_local,ivperpp_local)
+                                icsc = icsc_func(ivpa_local,ivpap_local,ielement_vpa,
+                                            vpa.ngrid,vpa.nelement,
+                                            ivperp_local,ivperpp_local,
+                                            ielement_vperp,
+                                            vperp.ngrid,vperp.nelement)
+                                #println("ielement_vpa: ",ielement_vpa," ielement_vperp: ",ielement_vperp)
+                                #println("ivpa_local: ",ivpa_local," ivpap_local: ",ivpap_local)
+                                #println("ivperp_local: ",ivperp_local," ivperpp_local: ",ivperpp_local)
+                                #println("ic: ",ic_global," icp: ",icp_global)
+                                # boundary condition possibilities
+                                lower_boundary_row_vpa = (ielement_vpa == 1 && ivpa_local == 1)
+                                upper_boundary_row_vpa = (ielement_vpa == vpa.nelement && ivpa_local == vpa.ngrid)
+                                lower_boundary_row_vperp = (ielement_vperp == 1 && ivperp_local == 1)
+                                upper_boundary_row_vperp = (ielement_vperp == vperp.nelement && ivperp_local == vperp.ngrid)
+
+
+                                if lower_boundary_row_vpa
+                                    if ivpap_local == 1 && ivperp_local == ivperpp_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif upper_boundary_row_vpa
+                                    if ivpap_local == vpa.ngrid && ivperp_local == ivperpp_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif lower_boundary_row_vperp && impose_BC_at_zero_vperp
+                                    if ivperpp_local == 1 && ivpa_local == ivpap_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                elseif upper_boundary_row_vperp
+                                    if ivperpp_local == vperp.ngrid && ivpa_local == ivpap_local
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
+                                    else
+                                        assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
+                                        assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
+                                    end
+                                else
+                                    # assign Laplacian matrix data
+                                    assemble_constructor_data!(LP2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                KKperp[ivperp_local,ivperpp_local]))
+                                    assemble_constructor_data!(LV2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MRperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                PPperp[ivperp_local,ivperpp_local] -
+                                                MNperp[ivperp_local,ivperpp_local])))
+                                    assemble_constructor_data!(LB2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MRperp[ivperp_local,ivperpp_local] +
+                                                MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                PPperp[ivperp_local,ivperpp_local] -
+                                            4.0*MNperp[ivperp_local,ivperpp_local])))
+                                end
+                                #assign mass matrix
+                                assemble_constructor_data!(MM2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+
+                                # assign K matrices (no explicit boundary terms)
+                                assemble_constructor_data!(KKpar2D,icsc,ic_global,icp_global,
+                                                (KKpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KKperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                KKperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KPperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                (KJperp[ivperp_local,ivperpp_local] -
+                                                2.0*PPperp[ivperp_local,ivperpp_local] -
+                                                2.0*MNperp[ivperp_local,ivperpp_local])))
+
+                                # assign K matrices (with explicit boundary terms from integration by parts)
+                                assemble_constructor_data!(KKpar2D_with_BC_terms,icsc,ic_global,icp_global,
+                                                (KKpar_with_BC_terms[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(KKperp2D_with_BC_terms,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                KKperp_with_BC_terms[ivperp_local,ivperpp_local]))
+                                # assign PU matrix
+                                assemble_constructor_data!(PUperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                PUperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(PPparPUperp2D,icsc,ic_global,icp_global,
+                                                (PPpar[ivpa_local,ivpap_local]*
+                                                PUperp[ivperp_local,ivperpp_local]))
+                                assemble_constructor_data!(PPpar2D,icsc,ic_global,icp_global,
+                                                (PPpar[ivpa_local,ivpap_local]*
+                                                MMperp[ivperp_local,ivperpp_local]))
+                                # assign RHS mass matrix for d2Gdvperp2
+                                assemble_constructor_data!(MMparMNperp2D,icsc,ic_global,icp_global,
+                                                (MMpar[ivpa_local,ivpap_local]*
+                                                MNperp[ivperp_local,ivperpp_local]))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        MM2D_sparse = create_sparse_matrix(MM2D)
+        KKpar2D_sparse = create_sparse_matrix(KKpar2D)
+        KKperp2D_sparse = create_sparse_matrix(KKperp2D)
+        KKpar2D_with_BC_terms_sparse = create_sparse_matrix(KKpar2D_with_BC_terms)
+        KKperp2D_with_BC_terms_sparse = create_sparse_matrix(KKperp2D_with_BC_terms)
+        LP2D_sparse = create_sparse_matrix(LP2D)
+        LV2D_sparse = create_sparse_matrix(LV2D)
+        LB2D_sparse = create_sparse_matrix(LB2D)
+        KPperp2D_sparse = create_sparse_matrix(KPperp2D)
+        PUperp2D_sparse = create_sparse_matrix(PUperp2D)
+        PPparPUperp2D_sparse = create_sparse_matrix(PPparPUperp2D)
+        PPpar2D_sparse = create_sparse_matrix(PPpar2D)
+        MMparMNperp2D_sparse = create_sparse_matrix(MMparMNperp2D)
+        if print_to_screen
+            println("finished elliptic operator constructor assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
+        end
+        # lu objects for the assembled operators
+        lu_obj_MM = lu(MM2D_sparse)
+        lu_obj_LP = lu(LP2D_sparse)
+        lu_obj_LV = lu(LV2D_sparse)
+        lu_obj_LB = lu(LB2D_sparse)
+        # dummy arrays for elliptic solvers
+        S_dummy = allocate_float(vpa.n,vperp.n)
+        Q_dummy = allocate_float(vpa.n,vperp.n)
+        rhsvpavperp = allocate_float(vpa.n,vperp.n)
+
+        return new(MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
+                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
+                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
+                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
+                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
+                    S_dummy, Q_dummy, rhsvpavperp)
+    end
+end
+
+struct rosenbluth_potential_data
+    # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
+    GG::Array{mk_float,2}
+    HH::Array{mk_float,2}
+    dHdvpa::Array{mk_float,2}
+    dHdvperp::Array{mk_float,2}
+    dGdvperp::Array{mk_float,2}
+    d2Gdvperp2::Array{mk_float,2}
+    d2Gdvpa2::Array{mk_float,2}
+    d2Gdvperpdvpa::Array{mk_float,2}
+    function rosenbluth_potential_data(vpa::finite_element_coordinate,
+                                vperp::finite_element_coordinate)
+        GG = allocate_float(vpa.n,vperp.n)
+        HH = allocate_float(vpa.n,vperp.n)
+        dHdvpa = allocate_float(vpa.n,vperp.n)
+        dHdvperp = allocate_float(vpa.n,vperp.n)
+        dGdvperp = allocate_float(vpa.n,vperp.n)
+        d2Gdvperp2 = allocate_float(vpa.n,vperp.n)
+        d2Gdvpa2 = allocate_float(vpa.n,vperp.n)
+        d2Gdvperpdvpa = allocate_float(vpa.n,vperp.n)
+        return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa)
+    end
+end
+
+struct fokkerplanck_rosenbluth_potential_solver_data
+    # boundary weights (Green's function) data
+    bwgt::fokkerplanck_boundary_integration_struct
+    # dummy arrays for boundary data calculation
+    rpbd::rosenbluth_potential_boundary_data
+    # option for boundary data calculation
+    boundary_data_option::boundary_data_type
+    # assembled 2D weak-form matrices
+    matrix_operators::assembled_matrix_operators_sparse
+    function fokkerplanck_rosenbluth_potential_solver_data(vpa::finite_element_coordinate,
+                                                    vperp::finite_element_coordinate,
+                                                    YY_arrays::YY_collision_operator_arrays,
+                                                    boundary_data_option::boundary_data_type;
+                                                    print_to_screen=true)
+        bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
+        if vperp.n > 1 && boundary_data_option == direct_integration
+            init_Rosenbluth_potential_boundary_integration_weights!(bwgt.G0_weights, bwgt.G1_weights, bwgt.H0_weights, bwgt.H1_weights,
+                                            bwgt.H2_weights, bwgt.H3_weights, vpa, vperp, print_to_screen=print_to_screen)
+        end
+        rpbd = rosenbluth_potential_boundary_data(vpa,vperp)
+        matrix_operators = assembled_matrix_operators_sparse(vpa,vperp,YY_arrays,print_to_screen=print_to_screen)
+        return new(bwgt, rpbd, boundary_data_option, matrix_operators)
+    end
+end
+
 """
 Immutable information about each species
 """
@@ -488,86 +786,14 @@ struct fokkerplanck_weakform_arrays_struct
     vperp::finite_element_coordinate
     # species information
     species::species_info
-    # boundary weights (Green's function) data
-    bwgt::fokkerplanck_boundary_integration_struct
-    # dummy arrays for boundary data calculation
-    rpbd::rosenbluth_potential_boundary_data
-    # option for boundary data calculation
-    boundary_data_option::boundary_data_type
-    # assembled 2D weak-form matrices
-    MM2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKpar2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KKperp2D_with_BC_terms_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LP2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LV2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    LB2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PPparPUperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    PPpar2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    MMparMNperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    KPperp2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    # lu decomposition objects
-    lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LP::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LV::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_obj_LB::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    # data for Rosenbluth potential elliptic solver
+    fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data
     # elemental matrices for the assembly of C[Fs,Fsp]
     YY_arrays::YY_collision_operator_arrays
-    # dummy arrays for elliptic solvers
-    S_dummy::Array{mk_float,2}
-    Q_dummy::Array{mk_float,2}
-    rhsvpavperp::Array{mk_float,2}
-    # dummy array for the result of the calculation (multi species)
-    CCs::Array{mk_float,3}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp,species)
-    GGs::Array{mk_float,3}
-    HHs::Array{mk_float,3}
-    dHsdvpa::Array{mk_float,3}
-    dHsdvperp::Array{mk_float,3}
-    dGsdvperp::Array{mk_float,3}
-    d2Gsdvperp2::Array{mk_float,3}
-    d2Gsdvpa2::Array{mk_float,3}
-    d2Gsdvperpdvpa::Array{mk_float,3}
-    # dummy array for the result of the calculation
-    CC::Array{mk_float,2}
+    rosenbluth_potentials_s::Vector{rosenbluth_potential_data}
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
-    GG::Array{mk_float,2}
-    HH::Array{mk_float,2}
-    dHdvpa::Array{mk_float,2}
-    dHdvperp::Array{mk_float,2}
-    dGdvperp::Array{mk_float,2}
-    d2Gdvperp2::Array{mk_float,2}
-    d2Gdvpa2::Array{mk_float,2}
-    d2Gdvperpdvpa::Array{mk_float,2}
-    FF::Array{mk_float,2}
-    dFdvpa::Array{mk_float,2}
-    dFdvperp::Array{mk_float,2}
-    # matrices for storing preconditioner
-    # based on I - dt * C[delta F, F]
-    CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
-    CC2D_sparse_constructor::sparse_matrix_constructor
-    lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
-    lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
-    # dummy array for vpa vperp advection contributions
-    rhs_advection::Array{mk_float,2}
-    # dummy arrays for Jacobian-Free-Newton-Krylov solver
-    nl_solver_data::nl_solver_info{Array{mk_float,2},Array{mk_float,3},Array{mk_float,1}}
-    Fnew::Array{mk_float,2}
-    Fresidual::Array{mk_float,2}
-    F_delta_x::Array{mk_float,2}
-    F_rhs_delta::Array{mk_float,2}
-    Fv::Array{mk_float,2}
-    Fw::Array{mk_float,2}
-    # multispecies dummy arrays
-    nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
-    Fs_new::Array{mk_float,3}
-    Fs_residual::Array{mk_float,3}
-    Fs_delta_x::Array{mk_float,3}
-    Fs_rhs_delta::Array{mk_float,3}
-    Fsv::Array{mk_float,3}
-    Fsw::Array{mk_float,3}
+    rosenbluth_potentials::rosenbluth_potential_data
     # collision operator moment arrays
     delta_n_sp_s::Array{mk_float,2}
     delta_m_sp_s::Array{mk_float,2}
@@ -583,99 +809,33 @@ struct fokkerplanck_weakform_arrays_struct
     delta_E::Array{mk_float,1}
     # conserving correction coefficients
     correction_coeffs_z::Array{mk_float,3}
+    # dummy array for end-of-step corrections
+    delta_pdf::Array{mk_float,3}
+    # option to control which numerical error corrections method to use
+    multi_species_operator_option::multi_species_operator_type
     """
     Function that initialises the arrays needed for Fokker Planck collisions
     using numerical integration to compute the Rosenbluth potentials only
-    at the boundary and using an elliptic solve to obtain the potentials 
+    at the boundary and using an elliptic solve to obtain the potentials
     in the rest of the velocity space domain.
     """
     function fokkerplanck_weakform_arrays_struct(vpa::finite_element_coordinate,
                                                 vperp::finite_element_coordinate,
                                                 species::species_info,
                                                 boundary_data_option::boundary_data_type;
-                                                nl_solver_atol=1.0e-10::mk_float,
-                                                nl_solver_rtol=0.0::mk_float,
-                                                nl_solver_nonlinear_max_iterations=20::mk_int,
+                                                multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
                                                 print_to_screen=true::Bool)
-        bwgt = fokkerplanck_boundary_integration_struct(vpa,vperp)
-        if vperp.n > 1 && boundary_data_option == direct_integration
-            init_Rosenbluth_potential_boundary_integration_weights!(bwgt.G0_weights, bwgt.G1_weights, bwgt.H0_weights, bwgt.H1_weights,
-                                            bwgt.H2_weights, bwgt.H3_weights, vpa, vperp, print_to_screen=print_to_screen)
-        end
-        rpbd = rosenbluth_potential_boundary_data(vpa,vperp)
         YY_arrays = YY_collision_operator_arrays(vpa,vperp)
-        if print_to_screen
-            println("finished YY array calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        end
-        MM2D_sparse, KKpar2D_sparse, KKperp2D_sparse,
-        KKpar2D_with_BC_terms_sparse, KKperp2D_with_BC_terms_sparse,
-        LP2D_sparse, LV2D_sparse, LB2D_sparse, KPperp2D_sparse,
-        PUperp2D_sparse, PPparPUperp2D_sparse, PPpar2D_sparse,
-        MMparMNperp2D_sparse = assemble_matrix_operators_dirichlet_bc_sparse(vpa,vperp,YY_arrays,print_to_screen=print_to_screen)
-        lu_obj_MM = lu(MM2D_sparse)
-        lu_obj_LP = lu(LP2D_sparse)
-        lu_obj_LV = lu(LV2D_sparse)
-        lu_obj_LB = lu(LB2D_sparse)
-        if print_to_screen
-            println("finished LU decomposition initialisation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        end
-        
+        fprp_solver_data = fokkerplanck_rosenbluth_potential_solver_data(vpa,vperp,
+                                YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
-        S_dummy = allocate_float(nvpa,nvperp)
-        Q_dummy = allocate_float(nvpa,nvperp)
-        rhsvpavperp = allocate_float(nvpa,nvperp)
-        
-        CC = allocate_float(nvpa,nvperp)
-        GG = allocate_float(nvpa,nvperp)
-        HH = allocate_float(nvpa,nvperp)
-        dHdvpa = allocate_float(nvpa,nvperp)
-        dHdvperp = allocate_float(nvpa,nvperp)
-        dGdvperp = allocate_float(nvpa,nvperp)
-        d2Gdvperp2 = allocate_float(nvpa,nvperp)
-        d2Gdvpa2 = allocate_float(nvpa,nvperp)
-        d2Gdvperpdvpa = allocate_float(nvpa,nvperp)
-
-        CCs = allocate_float(nvpa,nvperp,nspecies)
-        GGs = allocate_float(nvpa,nvperp,nspecies)
-        HHs = allocate_float(nvpa,nvperp,nspecies)
-        dHsdvpa = allocate_float(nvpa,nvperp,nspecies)
-        dHsdvperp = allocate_float(nvpa,nvperp,nspecies)
-        dGsdvperp = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvperp2 = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvpa2 = allocate_float(nvpa,nvperp,nspecies)
-        d2Gsdvperpdvpa = allocate_float(nvpa,nvperp,nspecies)
-        
-        FF = allocate_float(nvpa,nvperp)
-        dFdvpa = allocate_float(nvpa,nvperp)
-        dFdvperp = allocate_float(nvpa,nvperp)
-        # preconditioner matrix
-        CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
-        lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
+        rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,nspecies)
         for is in 1:nspecies
-            lu_objs_CC2D[is] = lu_obj_CC2D
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
         end
-        rhs_advection = allocate_float(nvpa,nvperp)
-        # dummy arrays for JFNK
-        nl_solver_data = setup_fp_nl_solve(vpa,vperp;
-                                        atol=nl_solver_atol,
-                                        rtol=nl_solver_rtol,
-                                        nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
-        Fnew = allocate_float(nvpa,nvperp)
-        Fresidual = allocate_float(nvpa,nvperp)
-        F_delta_x = allocate_float(nvpa,nvperp)
-        F_rhs_delta = allocate_float(nvpa,nvperp)
-        Fv = allocate_float(nvpa,nvperp)
-        Fw = allocate_float(nvpa,nvperp)
-        nl_solver_data_s = nl_solver_info((species=species,vperp=vperp,vpa=vpa);
-                                        atol=nl_solver_atol,
-                                        rtol=nl_solver_rtol,
-                                        nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
-        Fs_new = allocate_float(nvpa,nvperp,nspecies)
-        Fs_residual = allocate_float(nvpa,nvperp,nspecies)
-        Fs_delta_x = allocate_float(nvpa,nvperp,nspecies)
-        Fs_rhs_delta = allocate_float(nvpa,nvperp,nspecies)
-        Fsv = allocate_float(nvpa,nvperp,nspecies)
-        Fsw = allocate_float(nvpa,nvperp,nspecies)
+        rosenbluth_potentials = rosenbluth_potential_data(vpa,vperp)
+
+        # multi-species conserving corrections
         delta_n_sp_s = allocate_float(nspecies,nspecies)
         delta_m_sp_s = allocate_float(nspecies,nspecies)
         delta_p_sp_s = allocate_float(nspecies,nspecies)
@@ -689,23 +849,118 @@ struct fokkerplanck_weakform_arrays_struct
         delta_P = allocate_float(nspecies)
         delta_E = allocate_float(nspecies)
         correction_coeffs_z = allocate_float(3,nspecies,nspecies)
-        return new(vpa,vperp,species,bwgt,rpbd,boundary_data_option,
-                    MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
-                    KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
-                    LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
-                    PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
-                    lu_obj_MM,lu_obj_LP,lu_obj_LV,lu_obj_LB,
-                    YY_arrays, S_dummy, Q_dummy, rhsvpavperp,
-                    CCs, GGs, HHs, dHsdvpa, dHsdvperp, dGsdvperp, d2Gsdvperp2, d2Gsdvpa2, d2Gsdvperpdvpa,
-                    CC, GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
-                    FF, dFdvpa, dFdvperp, 
-                    CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D, lu_objs_CC2D,
-                    rhs_advection,
-                    nl_solver_data, Fnew, Fresidual, F_delta_x, F_rhs_delta, Fv, Fw,
-                    nl_solver_data_s, Fs_new, Fs_residual, Fs_delta_x, Fs_rhs_delta, Fsv, Fsw,
+        delta_pdf = allocate_float(nvpa,nvperp,nspecies)
+        return new(vpa, vperp, species, fprp_solver_data, YY_arrays,
+                    rosenbluth_potentials_s, rosenbluth_potentials,
                     delta_n_sp_s, delta_m_sp_s, delta_p_sp_s,
                     density, upar, pressure, ppar, qpar, rmom,
-                    delta_n, delta_P, delta_E, correction_coeffs_z)
+                    delta_n, delta_P, delta_E, correction_coeffs_z, delta_pdf,
+                    multi_species_operator_option)
+    end
+end
+
+struct fokker_plack_backward_euler_data
+    # arrays for storing collision operator computed
+    # when iterating in the backward Euler step
+    CCs::Array{mk_float,3}
+    # matrices for storing preconditioner
+    # based on I - dt * C[delta F, F]
+    CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
+    CC2D_sparse_constructor::sparse_matrix_constructor
+    lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int}
+    lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}
+    # dummy arrays for Jacobian-Free-Newton-Krylov solver
+    # multispecies dummy arrays
+    nl_solver_data_s::nl_solver_info{Array{mk_float,2},Array{mk_float,4},Array{mk_float,1}}
+    Fs_new::Array{mk_float,3}
+    Fs_residual::Array{mk_float,3}
+    Fs_delta_x::Array{mk_float,3}
+    Fs_rhs_delta::Array{mk_float,3}
+    Fsv::Array{mk_float,3}
+    Fsw::Array{mk_float,3}
+    fp_operator::fokkerplanck_weakform_arrays_struct
+    # constructor with interface and JFNK optional arguments
+    """
+    Wrapper function to provide the interface for initialising the
+    Fokker Planck operator arrays and operators. We require that
+    the inputs are provided with the types
+    ```
+        inputs =  scalar_coordinate_inputs(ngrid, nelement, L)
+    ```
+    or
+    ```
+        inputs = Array{element_coordinates,1}(undef, nelement)
+    ```
+    where the former type is defined in `FokkerPlanck.coordinates`
+    and the latterr is defined in `FiniteElementMatrices`.
+    """
+    function fokker_plack_backward_euler_data(
+        mass::Vector{mk_float},
+        zeds::Vector{mk_float},
+        inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
+        inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
+        bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
+        bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+        boundary_data_option=multipole_expansion::boundary_data_type,
+        multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
+        nl_solver_atol=1.0e-10::mk_float,
+        nl_solver_rtol=0.0::mk_float,
+        nl_solver_nonlinear_max_iterations=20::mk_int,
+        print_to_screen=true::Bool)
+
+        # create the coordinate structs from the input data
+        vperp = finite_element_coordinate("vperp", inputs_vperp,
+                                    bc=bc_vperp)
+        vpa = finite_element_coordinate("vpa", inputs_vpa,
+                                    bc=bc_vpa)
+        species = species_info(mass,zeds)
+        # use constructor function for fokkerplanck_weakform_arrays_struct
+        return fokker_plack_backward_euler_data(vpa,vperp,species,
+                    boundary_data_option,multi_species_operator_option,
+                    nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
+                    print_to_screen)
+    end
+    # constructor without optional arguments
+    function fokker_plack_backward_euler_data(vpa::finite_element_coordinate,
+                                    vperp::finite_element_coordinate,
+                                    species::species_info,
+                                    boundary_data_option::boundary_data_type,
+                                    multi_species_operator_option::multi_species_operator_type,
+                                    nl_solver_atol::mk_float,
+                                    nl_solver_rtol::mk_float,
+                                    nl_solver_nonlinear_max_iterations::mk_int,
+                                    print_to_screen::Bool)
+        nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
+        # collision operator arrays for intermediate results
+        CCs = allocate_float(nvpa,nvperp,nspecies)
+        # preconditioner matrix
+        CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
+        lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
+        for is in 1:nspecies
+            lu_objs_CC2D[is] = lu_obj_CC2D
+        end
+        # dummy arrays for JFNK
+        nl_solver_data_s = nl_solver_info((species=species,vperp=vperp,vpa=vpa);
+                                        atol=nl_solver_atol,
+                                        rtol=nl_solver_rtol,
+                                        nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
+        Fs_new = allocate_float(nvpa,nvperp,nspecies)
+        Fs_residual = allocate_float(nvpa,nvperp,nspecies)
+        Fs_delta_x = allocate_float(nvpa,nvperp,nspecies)
+        Fs_rhs_delta = allocate_float(nvpa,nvperp,nspecies)
+        Fsv = allocate_float(nvpa,nvperp,nspecies)
+        Fsw = allocate_float(nvpa,nvperp,nspecies)
+        # data for the FP operators
+        fp_operator = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,
+                                                boundary_data_option;
+                                                multi_species_operator_option=multi_species_operator_option,
+                                                print_to_screen=print_to_screen)
+        return new(CCs,
+            CC2D_sparse,CC2D_sparse_constructor,lu_obj_CC2D,
+            lu_objs_CC2D,
+            nl_solver_data_s,
+            Fs_new,Fs_residual,Fs_delta_x,Fs_rhs_delta,Fsv,Fsw,
+            fp_operator)
     end
 end
 
@@ -723,9 +978,9 @@ function init_Rosenbluth_potential_integration_weights!(G0_weights::Twgts,G1_wei
     if print_to_screen
         println("beginning weights calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # precalculated weights, integrating over Lagrange polynomials
-    @inbounds begin 
+    @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
                 #limits where checks required to determine which divergence-safe grid is needed
@@ -776,7 +1031,7 @@ function setup_basic_quadratures(vpa::finite_element_coordinate,
     if print_to_screen
         println("setting up GL quadrature   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # get Gauss-Legendre points and weights on (-1,1)
     ngrid = max(vpa.ngrid,vperp.ngrid)
     nquad = 2*ngrid
@@ -827,7 +1082,7 @@ function init_Rosenbluth_potential_boundary_integration_weights!(G0_weights::Twg
     if print_to_screen
         println("beginning (boundary) weights calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
     end
-    
+
     # precalculate weights, integrating over Lagrange polynomials
     # first compute weights along lower vpa boundary
     ivpa = 1 # lower_vpa_boundary
@@ -1575,7 +1830,7 @@ function calculate_boundary_data!(func_data::vpa_vperp_boundary_data,
             end
         end
     end
-    
+
     return nothing
 end
 
@@ -2296,213 +2551,6 @@ function enforce_dirichlet_bc!(fvpavperp::AbstractArray{mk_float,2},
     return nothing
 end
 
-"""
-Function to contruct the global sparse matrices used to solve
-the elliptic PDEs for the Rosenbluth potentials. Uses a sparse matrix
-construction method. The matrices are 2D in the compound index `ic`
-which indexes the velocity space labelled by `ivpa,ivperp`.
-Dirichlet boundary conditions are imposed in the appropriate stiffness
-matrices by setting the boundary row to be the Kronecker delta
-(0 except where `ivpa = ivpap` and `ivperp = ivperpp`).
-See also `assemble_matrix_operators_dirichlet_bc()`.
-"""
-function assemble_matrix_operators_dirichlet_bc_sparse(vpa::finite_element_coordinate,
-                                                vperp::finite_element_coordinate,
-                                                YY_arrays::YY_collision_operator_arrays;
-                                                print_to_screen=true)
-    # Assemble a 2D mass matrix in the global compound coordinate
-    nc_global = vpa.n*vperp.n
-    ntot_vpa = (vpa.nelement - 1)*(vpa.ngrid^2 - 1) + vpa.ngrid^2
-    ntot_vperp = (vperp.nelement - 1)*(vperp.ngrid^2 - 1) + vperp.ngrid^2
-    nsparse = ntot_vpa*ntot_vperp
-
-    MM2D = sparse_matrix_constructor(nsparse)
-    KKpar2D = sparse_matrix_constructor(nsparse)
-    KKperp2D = sparse_matrix_constructor(nsparse)
-    KKpar2D_with_BC_terms = sparse_matrix_constructor(nsparse)
-    KKperp2D_with_BC_terms = sparse_matrix_constructor(nsparse)
-    PUperp2D = sparse_matrix_constructor(nsparse)
-    PPparPUperp2D = sparse_matrix_constructor(nsparse)
-    PPpar2D = sparse_matrix_constructor(nsparse)
-    MMparMNperp2D = sparse_matrix_constructor(nsparse)
-    KPperp2D = sparse_matrix_constructor(nsparse)
-    # Laplacian matrix
-    LP2D = sparse_matrix_constructor(nsparse)
-    # Modified Laplacian matrix (for d / d vperp potentials)
-    LV2D = sparse_matrix_constructor(nsparse)
-    # Modified Laplacian matrix (for d^2 / d vperp^2 potentials)
-    LB2D = sparse_matrix_constructor(nsparse)
-
-    impose_BC_at_zero_vperp = false
-    if print_to_screen
-        println("begin elliptic operator assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
-    end
-    for ielement_vperp in 1:vperp.nelement
-        @views MMperp = YY_arrays.MMperp[:,:,ielement_vperp]
-        @views MRperp = YY_arrays.MRperp[:,:,ielement_vperp]
-        @views MNperp = YY_arrays.MNperp[:,:,ielement_vperp]
-        @views KKperp = YY_arrays.KKperp[:,:,ielement_vperp]
-        @views KJperp = YY_arrays.KJperp[:,:,ielement_vperp]
-        @views PPperp = YY_arrays.PPperp[:,:,ielement_vperp]
-        @views PUperp = YY_arrays.PUperp[:,:,ielement_vperp]
-        @views KKperp_with_BC_terms = YY_arrays.KKperp_with_BC_terms[:,:,ielement_vperp]
-        for ielement_vpa in 1:vpa.nelement
-            @views MMpar = YY_arrays.MMpar[:,:,ielement_vpa]
-            @views KKpar = YY_arrays.KKpar[:,:,ielement_vpa]
-            @views KKpar_with_BC_terms = YY_arrays.KKpar_with_BC_terms[:,:,ielement_vpa]
-            @views PPpar = YY_arrays.PPpar[:,:,ielement_vpa]
-            for ivperpp_local in 1:vperp.ngrid
-                for ivperp_local in 1:vperp.ngrid
-                    for ivpap_local in 1:vpa.ngrid
-                        for ivpa_local in 1:vpa.ngrid
-                            ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
-                            icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpap_local,ivperpp_local) #get_indices(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivpap_local,ivperp_local,ivperpp_local)
-                            icsc = icsc_func(ivpa_local,ivpap_local,ielement_vpa,
-                                           vpa.ngrid,vpa.nelement,
-                                           ivperp_local,ivperpp_local,
-                                           ielement_vperp,
-                                           vperp.ngrid,vperp.nelement)
-                            #println("ielement_vpa: ",ielement_vpa," ielement_vperp: ",ielement_vperp)
-                            #println("ivpa_local: ",ivpa_local," ivpap_local: ",ivpap_local)
-                            #println("ivperp_local: ",ivperp_local," ivperpp_local: ",ivperpp_local)
-                            #println("ic: ",ic_global," icp: ",icp_global)
-                            # boundary condition possibilities
-                            lower_boundary_row_vpa = (ielement_vpa == 1 && ivpa_local == 1)
-                            upper_boundary_row_vpa = (ielement_vpa == vpa.nelement && ivpa_local == vpa.ngrid)
-                            lower_boundary_row_vperp = (ielement_vperp == 1 && ivperp_local == 1)
-                            upper_boundary_row_vperp = (ielement_vperp == vperp.nelement && ivperp_local == vperp.ngrid)
-
-
-                            if lower_boundary_row_vpa
-                                if ivpap_local == 1 && ivperp_local == ivperpp_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif upper_boundary_row_vpa
-                                if ivpap_local == vpa.ngrid && ivperp_local == ivperpp_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif lower_boundary_row_vperp && impose_BC_at_zero_vperp
-                                if ivperpp_local == 1 && ivpa_local == ivpap_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            elseif upper_boundary_row_vperp
-                                if ivperpp_local == vperp.ngrid && ivpa_local == ivpap_local
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,1.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,1.0)
-                                else
-                                    assign_constructor_data!(LP2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LV2D,icsc,ic_global,icp_global,0.0)
-                                    assign_constructor_data!(LB2D,icsc,ic_global,icp_global,0.0)
-                                end
-                            else
-                                # assign Laplacian matrix data
-                                assemble_constructor_data!(LP2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                             KKperp[ivperp_local,ivperpp_local]))
-                                assemble_constructor_data!(LV2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MRperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                            (KJperp[ivperp_local,ivperpp_local] -
-                                             PPperp[ivperp_local,ivperpp_local] -
-                                             MNperp[ivperp_local,ivperpp_local])))
-                                assemble_constructor_data!(LB2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MRperp[ivperp_local,ivperpp_local] +
-                                             MMpar[ivpa_local,ivpap_local]*
-                                             (KJperp[ivperp_local,ivperpp_local] -
-                                              PPperp[ivperp_local,ivperpp_local] -
-                                          4.0*MNperp[ivperp_local,ivperpp_local])))
-                            end
-                            #assign mass matrix
-                            assemble_constructor_data!(MM2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-
-                            # assign K matrices (no explicit boundary terms)
-                            assemble_constructor_data!(KKpar2D,icsc,ic_global,icp_global,
-                                            (KKpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KKperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             KKperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KPperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             (KJperp[ivperp_local,ivperpp_local] -
-                                              2.0*PPperp[ivperp_local,ivperpp_local] -
-                                              2.0*MNperp[ivperp_local,ivperpp_local])))
-
-                            # assign K matrices (with explicit boundary terms from integration by parts)
-                            assemble_constructor_data!(KKpar2D_with_BC_terms,icsc,ic_global,icp_global,
-                                            (KKpar_with_BC_terms[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(KKperp2D_with_BC_terms,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             KKperp_with_BC_terms[ivperp_local,ivperpp_local]))
-                            # assign PU matrix
-                            assemble_constructor_data!(PUperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             PUperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(PPparPUperp2D,icsc,ic_global,icp_global,
-                                            (PPpar[ivpa_local,ivpap_local]*
-                                             PUperp[ivperp_local,ivperpp_local]))
-                            assemble_constructor_data!(PPpar2D,icsc,ic_global,icp_global,
-                                            (PPpar[ivpa_local,ivpap_local]*
-                                             MMperp[ivperp_local,ivperpp_local]))
-                            # assign RHS mass matrix for d2Gdvperp2
-                            assemble_constructor_data!(MMparMNperp2D,icsc,ic_global,icp_global,
-                                            (MMpar[ivpa_local,ivpap_local]*
-                                             MNperp[ivperp_local,ivperpp_local]))
-                        end
-                    end
-                end
-            end
-        end
-    end
-    MM2D_sparse = create_sparse_matrix(MM2D)
-    KKpar2D_sparse = create_sparse_matrix(KKpar2D)
-    KKperp2D_sparse = create_sparse_matrix(KKperp2D)
-    KKpar2D_with_BC_terms_sparse = create_sparse_matrix(KKpar2D_with_BC_terms)
-    KKperp2D_with_BC_terms_sparse = create_sparse_matrix(KKperp2D_with_BC_terms)
-    LP2D_sparse = create_sparse_matrix(LP2D)
-    LV2D_sparse = create_sparse_matrix(LV2D)
-    LB2D_sparse = create_sparse_matrix(LB2D)
-    KPperp2D_sparse = create_sparse_matrix(KPperp2D)
-    PUperp2D_sparse = create_sparse_matrix(PUperp2D)
-    PPparPUperp2D_sparse = create_sparse_matrix(PPparPUperp2D)
-    PPpar2D_sparse = create_sparse_matrix(PPpar2D)
-    MMparMNperp2D_sparse = create_sparse_matrix(MMparMNperp2D)
-    if print_to_screen
-        println("finished elliptic operator constructor assignment   ", Dates.format(now(), dateformat"H:MM:SS"))
-    end
-    return MM2D_sparse, KKpar2D_sparse, KKperp2D_sparse,
-           KKpar2D_with_BC_terms_sparse, KKperp2D_with_BC_terms_sparse,
-           LP2D_sparse, LV2D_sparse, LB2D_sparse,
-           KPperp2D_sparse, PUperp2D_sparse, PPparPUperp2D_sparse,
-           PPpar2D_sparse, MMparMNperp2D_sparse
-end
-
 function allocate_preconditioner_matrix(vpa::finite_element_coordinate,
                                     vperp::finite_element_coordinate)
     # Assemble a 2D mass matrix in the global compound coordinate
@@ -2545,40 +2593,29 @@ end
 
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     delta_t::mk_float,ms::mk_float,msp::mk_float,nussp::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+    fkpl_arrays::fokker_plack_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
 
-    #Precon2D_sparse = fkpl_arrays.Precon2D_sparse
-    #CC2D_sparse = fkpl_arrays.CC2D_sparse
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
     CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
-    YY_arrays = fkpl_arrays.YY_arrays
-    GG = fkpl_arrays.GG
-    HH = fkpl_arrays.HH
-    dHdvpa = fkpl_arrays.dHdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dGdvperp = fkpl_arrays.dGdvperp
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
+    fp_operator = fkpl_arrays.fp_operator
+    vpa = fp_operator.vpa
+    vperp = fp_operator.vperp
+    YY_arrays = fp_operator.YY_arrays
+    rosenbluth_potentials = fp_operator.rosenbluth_potentials
 
     # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
     if use_Maxwellian_Rosenbluth_coefficients
-        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG,HH,dHdvpa,dHdvperp,
-                 d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,vpa,vperp,msp)
+        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,pdf,vpa,vperp,msp)
     else
-        calculate_rosenbluth_potentials_via_elliptic_solve!(GG,HH,dHdvpa,dHdvperp,
-             d2Gdvpa2,dGdvperp,d2Gdvperpdvpa,d2Gdvperp2,pdf,
-             vpa,vperp,fkpl_arrays,msp,
+        calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,pdf,
+             vpa,vperp,fp_operator.fprp_solver_data,msp,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
-    assemble_collision_operator_preconditioner_rhs!(
-            d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-            delta_t,nussp,fkpl_arrays)
+    assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
+            rosenbluth_potentials,delta_t,nussp,fp_operator)
     # should improve on this step to avoid recreating the sparse array if possible.
     fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
     lu!(fkpl_arrays.lu_obj_CC2D, fkpl_arrays.CC2D_sparse)
@@ -2586,48 +2623,29 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
 end
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     delta_t::mk_float,nuref::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+    fkpl_arrays::fokker_plack_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
 
-    #Precon2D_sparse = fkpl_arrays.Precon2D_sparse
-    #CC2D_sparse = fkpl_arrays.CC2D_sparse
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    species = fkpl_arrays.species
     CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
-    YY_arrays = fkpl_arrays.YY_arrays
-    # dummy arrays for summed Rosenbluth potentials
-    dHdvpa_sum = fkpl_arrays.dHdvpa
-    dHdvperp_sum = fkpl_arrays.dHdvperp
-    d2Gdvperp2_sum = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2_sum = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa_sum = fkpl_arrays.d2Gdvperpdvpa
-    # dummy arrays for Rosenbluth potentials by species
-    GGs = fkpl_arrays.GGs
-    HHs = fkpl_arrays.HHs
-    dHsdvpa = fkpl_arrays.dHsdvpa
-    dHsdvperp = fkpl_arrays.dHsdvperp
-    dGsdvperp = fkpl_arrays.dGsdvperp
-    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
-    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
-    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
-
-    # consider making a wrapper function for the following block -- repeated in fokker_planck.jl
+    fp_operator = fkpl_arrays.fp_operator
+    vpa = fp_operator.vpa
+    vperp = fp_operator.vperp
+    species = fp_operator.species
+    YY_arrays = fp_operator.YY_arrays
+    # dummy arrays for Rosenbluth potentials
+    rosenbluth_potentials_s = fp_operator.rosenbluth_potentials_s
+    rosenbluth_potentials = fp_operator.rosenbluth_potentials
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
-                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,species.mass[is])
+                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,species.mass[is])
         end
     else
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
-                GGs[:,:,is],HHs[:,:,is],dHsdvpa[:,:,is],dHsdvperp[:,:,is],
-                d2Gsdvpa2[:,:,is],dGsdvperp[:,:,is],d2Gsdvperpdvpa[:,:,is],
-                d2Gsdvperp2[:,:,is],pdf[:,:,is],vpa,vperp,fkpl_arrays,species.mass[is],
+                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_solver_data,species.mass[is],
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -2637,12 +2655,10 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
         # total Rosenbluth potential, and assemble the preconditioner
         for is in 1:species.n
             calculate_cross_species_rosenbluth_potential_sums!(
-                    d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                    d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                    rosenbluth_potentials,rosenbluth_potentials_s,
                     species,is)
-            assemble_collision_operator_preconditioner_rhs!(
-                d2Gdvpa2_sum,d2Gdvperpdvpa_sum,d2Gdvperp2_sum,dHdvpa_sum,dHdvperp_sum,
-                delta_t,nuref,fkpl_arrays)
+            assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
+                rosenbluth_potentials,delta_t,nuref,fp_operator)
             # should improve on this step to avoid recreating the sparse array if possible.
             fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
             lu!(fkpl_arrays.lu_objs_CC2D[is], fkpl_arrays.CC2D_sparse)
@@ -2650,18 +2666,21 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     end
     return nothing
 end
-function assemble_collision_operator_preconditioner_rhs!(
-    d2Gdvpa2::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,
-    delta_t::mk_float,nuref::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct) where Tpdf <:AbstractArray{mk_float,2}
+function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor::sparse_matrix_constructor,
+    rosenbluth_potentials::rosenbluth_potential_data,delta_t::mk_float,nuref::mk_float,
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     # extract structs from fkpl_arrays
     # we do not extract the potentials from fkpl_arrays to permit flexibility
     # but pass this information by argument
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
-    CC2D_sparse_constructor = fkpl_arrays.CC2D_sparse_constructor
     YY_arrays = fkpl_arrays.YY_arrays
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
     @inbounds begin
         # set the values of the matrix to zero before assembly
         CC2D_sparse_constructor.SS .= 0.0
@@ -2797,14 +2816,14 @@ function assemble_collision_operator_preconditioner_rhs!(
 end
 
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
-                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                                    fkpl_arrays::fokker_plack_backward_euler_data)
     # (the LU decomposition object for)
     # the backward Euler time advance matrix
     # for linearised test particle collisions K * dF = C[dF, F^n+1].
     # this is also the LU decomposition of the approximate Jacobian
     # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     lu_CC = fkpl_arrays.lu_obj_CC2D
-    advance_linearised_test_particle_collisions!(pdf,fkpl_arrays,lu_CC)
+    advance_linearised_test_particle_collisions!(pdf,fkpl_arrays.fp_operator,lu_CC)
     return nothing
 end
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
@@ -2824,10 +2843,10 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     # values in CC2D_sparse, in the event BCs are used
     enforce_vpavperp_BCs!(pdf,vpa,vperp)
     # extra dummy arrays
-    pdf_scratch = fkpl_arrays.rhsvpavperp
-    pdf_dummy = fkpl_arrays.S_dummy
+    pdf_scratch = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    pdf_dummy = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
     # mass matrix for RHS
-    MM2D_sparse = fkpl_arrays.MM2D_sparse
+    MM2D_sparse = fkpl_arrays.fprp_solver_data.matrix_operators.MM2D_sparse
     @views @. pdf_scratch = pdf
     pdf_c = vec(pdf)
     pdf_scratch_c = vec(pdf_scratch)
@@ -2837,16 +2856,16 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     return nothing
 end
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,3},
-                                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                                    fkpl_arrays::fokker_plack_backward_euler_data)
     # (the vector of LU decomposition objects for)
     # the backward Euler time advance matrix
     # for multi-species linearised test particle collisions K * dF = C[dF, F^n+1].
     # this is also the LU decomposition of the approximate Jacobian
     # for the nonlinear residual R = F^n+1 - F^n - C[F^n+1, F^n+1]
     lu_CC = fkpl_arrays.lu_objs_CC2D
-    species = fkpl_arrays.species
+    species = fkpl_arrays.fp_operator.species
     for is in 1:species.n
-        @views advance_linearised_test_particle_collisions!(pdf[:,:,is],fkpl_arrays,lu_CC[is])
+        @views advance_linearised_test_particle_collisions!(pdf[:,:,is],fkpl_arrays.fp_operator,lu_CC[is])
     end
     return nothing
 end
@@ -2857,11 +2876,15 @@ in weak form. Once the array `rhsvpavperp` contains the assembled weak-form coll
 a mass matrix solve still must be carried out to find the time derivative of the distribution function
 due to collisions.
 """
-function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::Tpdf,pdfs::AbstractArray{mk_float,2},
-    d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,d2Gspdvperp2::Tpdf,
-    dHspdvpa::Tpdf,dHspdvperp::Tpdf,ms::mk_float,msp::mk_float,nussp::mk_float,
+function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::AbstractArray{mk_float,2},pdfs::AbstractArray{mk_float,2},
+    rosenbluth_potentials_sp::rosenbluth_potential_data,ms::mk_float,msp::mk_float,nussp::mk_float,
     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-    YY_arrays::YY_collision_operator_arrays) where Tpdf <: AbstractArray{mk_float,2}
+    YY_arrays::YY_collision_operator_arrays)
+    d2Gspdvpa2 = rosenbluth_potentials_sp.d2Gdvpa2
+    d2Gspdvperpdvpa = rosenbluth_potentials_sp.d2Gdvperpdvpa
+    d2Gspdvperp2 = rosenbluth_potentials_sp.d2Gdvperp2
+    dHspdvpa = rosenbluth_potentials_sp.dHdvpa
+    dHspdvperp = rosenbluth_potentials_sp.dHdvperp
     @inbounds begin
         # assemble RHS of collision operator
         rhsc = vec(rhsvpavperp)
@@ -2978,7 +3001,7 @@ function elliptic_solve!(field::AbstractArray{mk_float,2},source_1::Tpdf,source_
             matrix_rhs_1::AbstractSparseArray{mk_float,mk_int,2},
             matrix_rhs_2::AbstractSparseArray{mk_float,mk_int,2},
             rhs::Tpdf,vpa::finite_element_coordinate,
-            vperp::finite_element_coordinate) where Tpdf <: AbstractArray{mk_float,2} 
+            vperp::finite_element_coordinate) where Tpdf <: AbstractArray{mk_float,2}
 
     @inbounds begin
         # assemble the rhs of the weak system
@@ -3053,36 +3076,43 @@ accurate Dirichlet boundary condition on the maximum `vpa` and `vperp`
 of the domain. We use the sparse LU decomposition from the LinearAlgebra package
 to solve the PDE matrix equations.
 """
-function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
-             HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,dGdvperp::Tpdf,
-             d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,ffsp_in::AbstractArray{mk_float,2},
+function calculate_rosenbluth_potentials_via_elliptic_solve!(
+             rosenbluth_potentials::rosenbluth_potential_data,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-             fkpl_arrays::fokkerplanck_weakform_arrays_struct, mass::mk_float;
+             fkpl_arrays::fokkerplanck_rosenbluth_potential_solver_data, mass::mk_float;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
-             calculate_dGdvperp=false) where Tpdf <: AbstractArray{mk_float,2}
-
+             calculate_dGdvperp=false)
+    GG = rosenbluth_potentials.GG
+    HH = rosenbluth_potentials.HH
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dGdvperp = rosenbluth_potentials.dGdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
-    MM2D_sparse = fkpl_arrays.MM2D_sparse
-    KKpar2D_sparse = fkpl_arrays.KKpar2D_sparse
-    KKperp2D_sparse = fkpl_arrays.KKperp2D_sparse
-    LP2D_sparse = fkpl_arrays.LP2D_sparse
-    LV2D_sparse = fkpl_arrays.LV2D_sparse
-    PUperp2D_sparse = fkpl_arrays.PUperp2D_sparse
-    PPparPUperp2D_sparse = fkpl_arrays.PPparPUperp2D_sparse
-    PPpar2D_sparse = fkpl_arrays.PPpar2D_sparse
-    MMparMNperp2D_sparse = fkpl_arrays.MMparMNperp2D_sparse
-    KPperp2D_sparse = fkpl_arrays.KPperp2D_sparse
-    lu_obj_MM = fkpl_arrays.lu_obj_MM
-    lu_obj_LP = fkpl_arrays.lu_obj_LP
-    lu_obj_LV = fkpl_arrays.lu_obj_LV
-    lu_obj_LB = fkpl_arrays.lu_obj_LB
+    matrix_operators = fkpl_arrays.matrix_operators
+    MM2D_sparse = matrix_operators.MM2D_sparse
+    KKpar2D_sparse = matrix_operators.KKpar2D_sparse
+    KKperp2D_sparse = matrix_operators.KKperp2D_sparse
+    LP2D_sparse = matrix_operators.LP2D_sparse
+    LV2D_sparse = matrix_operators.LV2D_sparse
+    PUperp2D_sparse = matrix_operators.PUperp2D_sparse
+    PPparPUperp2D_sparse = matrix_operators.PPparPUperp2D_sparse
+    PPpar2D_sparse = matrix_operators.PPpar2D_sparse
+    MMparMNperp2D_sparse = matrix_operators.MMparMNperp2D_sparse
+    KPperp2D_sparse = matrix_operators.KPperp2D_sparse
+    lu_obj_MM = matrix_operators.lu_obj_MM
+    lu_obj_LP = matrix_operators.lu_obj_LP
+    lu_obj_LV = matrix_operators.lu_obj_LV
+    lu_obj_LB = matrix_operators.lu_obj_LB
 
     bwgt = fkpl_arrays.bwgt
     rpbd = fkpl_arrays.rpbd
 
-    S_dummy = fkpl_arrays.S_dummy
-    Q_dummy = fkpl_arrays.Q_dummy
-    rhsvpavperp = fkpl_arrays.rhsvpavperp
+    S_dummy = matrix_operators.S_dummy
+    Q_dummy = matrix_operators.Q_dummy
+    rhsvpavperp = matrix_operators.rhsvpavperp
     boundary_data_option = fkpl_arrays.boundary_data_option
     # calculate the boundary data
     if boundary_data_option == multipole_expansion
@@ -3115,7 +3145,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
                     rhsvpavperp, vpa, vperp)
     elliptic_solve!(dHdvperp, S_dummy, rpbd.dHdvperp_data, lu_obj_LV, PUperp2D_sparse,
                     rhsvpavperp, vpa, vperp)
-    
+
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -3136,7 +3166,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(GG::Tpdf,
                     rhsvpavperp, vpa, vperp)
     elliptic_solve!(d2Gdvperpdvpa, S_dummy, rpbd.d2Gdvperpdvpa_data, lu_obj_LV,
                     PPparPUperp2D_sparse, rhsvpavperp, vpa, vperp)
-    
+
     if algebraic_solve_for_d2Gdvperp2
         @inbounds begin
             for ivperp in 1:vperp.n
@@ -3211,12 +3241,18 @@ end
 Function to calculate Rosenbluth potentials for shifted Maxwellians
 using an analytical specification
 """
-function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG::Tpdf,
-    HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,d2Gdvpa2::Tpdf,
-    dGdvperp::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,
+function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+    rosenbluth_potentials::rosenbluth_potential_data,
     ffsp_in::AbstractArray{mk_float,2},vpa::finite_element_coordinate,
-    vperp::finite_element_coordinate,mass::mk_float) where Tpdf <: AbstractArray{mk_float,2}
-
+    vperp::finite_element_coordinate,mass::mk_float)
+    GG = rosenbluth_potentials.GG
+    HH = rosenbluth_potentials.HH
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dGdvperp = rosenbluth_potentials.dGdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     dens = get_density(ffsp_in, vpa, vperp)
     upar = get_upar(ffsp_in, vpa, vperp, dens)
     pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
@@ -3224,6 +3260,7 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(GG::Tpdf,
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
+                GG[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 HH[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 d2Gdvpa2[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
                 d2Gdvperp2[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
@@ -3314,9 +3351,14 @@ end
 """
 """
 function calculate_cross_species_rosenbluth_potential_sums!(
-                d2Gdvpa2,d2Gdvperpdvpa,d2Gdvperp2,dHdvpa,dHdvperp,
-                d2Gsdvpa2,d2Gsdvperpdvpa,d2Gsdvperp2,dHsdvpa,dHsdvperp,
+                rosenbluth_potentials::rosenbluth_potential_data,
+                rosenbluth_potentials_s::Vector{rosenbluth_potential_data},
                 species,is::mk_int)
+    dHdvpa = rosenbluth_potentials.dHdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
     mass = species.mass
     zeds = species.zeds
     d2Gdvpa2 .= 0.0
@@ -3324,15 +3366,18 @@ function calculate_cross_species_rosenbluth_potential_sums!(
     d2Gdvperp2 .= 0.0
     dHdvpa .= 0.0
     dHdvperp .= 0.0
-    # note that Coulomb logarithm factors are missing
     for isp in 1:species.n
+        # struct for Rosenbluth potentials for species s'
+        rp = rosenbluth_potentials_s[isp]
+        # add the contribution from species s' to the total
+        # note that Coulomb logarithm factors are missing
         G_factor = (zeds[is]*zeds[isp]/mass[is])^2
         H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
-        @. d2Gdvpa2 += d2Gsdvpa2[:,:,isp]*G_factor
-        @. d2Gdvperpdvpa += d2Gsdvperpdvpa[:,:,isp]*G_factor
-        @. d2Gdvperp2 += d2Gsdvperp2[:,:,isp]*G_factor
-        @. dHdvpa += dHsdvpa[:,:,isp]*H_factor
-        @. dHdvperp += dHsdvperp[:,:,isp]*H_factor
+        @. d2Gdvpa2 += rp.d2Gdvpa2*G_factor
+        @. d2Gdvperpdvpa += rp.d2Gdvperpdvpa*G_factor
+        @. d2Gdvperp2 += rp.d2Gdvperp2*G_factor
+        @. dHdvpa += rp.dHdvpa*H_factor
+        @. dHdvperp += rp.dHdvperp*H_factor
     end
     return nothing
 end
@@ -3475,7 +3520,7 @@ A_{02} & A_{12} & A_{22} \\\\
 \\end{array}
 ```
 appropriate for moment numerical conserving terms.
- 
+
 """
 function symmetric_matrix_inverse(A00::mk_float,A01::mk_float,A02::mk_float,
                             A11::mk_float,A12::mk_float,A22::mk_float,
@@ -3541,98 +3586,20 @@ Modifies the collision operator such that the operator becomes
 ```math
 C_{ss} = C^\\ast_{ss}[F_s,F_{s}] - \\left(x_0 + x_1(v_{\\|}-u_{\\|})+ x_2(v_\\perp^2 +(v_{\\|}-u_{\\|})^2)\\right)F_s
 ```
-where \$C^\\ast_{ss}[F_s,F_{s}]\$ is the weak-form self-collision operator computed using 
+where \$C^\\ast_{ss}[F_s,F_{s}]\$ is the weak-form self-collision operator computed using
 the finite-element implementation, \$u_{\\|}\$ is the parallel velocity of \$F_s\$,
 and \$x_0,x_1,x_2\$ are parameters that are chosen so that \$C_{ss}\$
 conserves density, parallel velocity and pressure of \$F_s\$.
 """
-function conserving_corrections!(CC::AbstractArray{mk_float,2},
-                            pdf_in::AbstractArray{mk_float,2},
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            mass::mk_float)
-    # compute moments of the input pdf
-    dens = get_density(pdf_in, vpa, vperp)
-    upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar, mass)
-    vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf_in, vpa, vperp, upar, mass)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar, mass)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar, mass)
-
-    # compute moments of the numerical collision operator
-    dn = get_density(CC, vpa, vperp)
-    du = get_upar(CC, vpa, vperp, 1.0)
-    dp = get_pressure(CC, vpa, vperp, upar, mass)
-    
-    # form the appropriate matrix coefficients
-    b0, b1, b2 = mass*dn, mass*(du - upar*dn), 3.0*dp
-    A00, A02, A11, A12, A22 = mass*dens, 3.0*pressure, ppar, 2.0*qpar, rmom
-
-    # obtain the coefficients for the corrections
-    (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
-    
-    # correct CC
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                wpar = vpa.grid[ivpa] - upar
-                CC[ivpa,ivperp] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp]
-            end
-        end
-    end
-end
-function conserving_corrections!(CC::AbstractArray{mk_float,2},
-                            pdf_in::AbstractArray{mk_float,2},
-                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = get_collision_moments(pdf_in, 1.0, 1.0, 1.0, fkpl_arrays)
-
-    # compute moments of the input pdf
-    dens = get_density(pdf_in, vpa, vperp)
-    upar = get_upar(pdf_in, vpa, vperp, dens)
-    pressure = get_pressure(pdf_in, vpa, vperp, upar)
-    vth = sqrt(2.0*pressure/dens)
-    ppar = get_ppar(pdf_in, vpa, vperp, upar)
-    qpar = get_qpar(pdf_in, vpa, vperp, upar)
-    rmom = get_rmom(pdf_in, vpa, vperp, upar)
-
-    # compute moments of the numerical collision operator
-    dn = get_density(CC, vpa, vperp)
-    du = get_upar(CC, vpa, vperp, 1.0)
-    dp = get_pressure(CC, vpa, vperp, upar)
-
-    println("dn: ", dn)
-    println("int_vpa_C: ", int_vpa_C, " du: ", du)
-    println("int_vpa_C - du: ", int_vpa_C - du)
-    int_w2_C = int_vpa2_C + int_vperp2_C - 2.0*upar*int_vpa_C
-    println("(1/3)*int_w2_C: ", (1.0/3.0)*int_w2_C, " dp: ", dp)
-    println("(1/3)*int_w2_C - dp: ", (1.0/3.0)*int_w2_C -  dp)
-
-    # form the appropriate matrix coefficients
-    b0, b1, b2 = dn, du - upar*dn, 3.0*dp
-    A00, A02, A11, A12, A22 = dens, 3.0*pressure, ppar, 2.0*qpar, rmom
-
-    # obtain the coefficients for the corrections
-    (x0, x1, x2) = symmetric_matrix_inverse(A00,A02,A11,A12,A22,b0,b1,b2)
-
-    # correct CC
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                wpar = vpa.grid[ivpa] - upar
-                CC[ivpa,ivperp] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp]
-            end
-        end
-    end
-end
+# corrections to preserve the symmetry of the collision operators
 function conserving_corrections!(CC::AbstractArray{mk_float,3},
                             pdf_in::AbstractArray{mk_float,3}, nuref::mk_float,
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     @inbounds begin
-        # calculate necessary moments and store in fkpl_arrays
-        calculate_collision_moments!(pdf_in,nuref,fkpl_arrays)
+        if fkpl_arrays.multi_species_operator_option == single_assembly_per_species
+            # calculate necessary moments and store in fkpl_arrays
+            calculate_collision_moments!(pdf_in,nuref,fkpl_arrays)
+        end
         # extract precomputed variables
         vpa = fkpl_arrays.vpa
         vperp = fkpl_arrays.vperp
@@ -3649,6 +3616,15 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         ppar = fkpl_arrays.ppar
         qpar = fkpl_arrays.qpar
         rmom = fkpl_arrays.rmom
+        # collect the calculated moments
+        for is in 1:species.n
+            @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
+            @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
+            @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+        end
         # correction coefficients
         zcoeffs = fkpl_arrays.correction_coeffs_z
         # first get the correction coefficients
@@ -3708,6 +3684,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
     end # @inbounds
     return nothing
 end
+# corrections to preserve the density, total momentum and total energy in the pdf(vpa,vperp,species)
 function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
                             pdf_old::AbstractArray{mk_float,3},
                             fkpl_arrays::fokkerplanck_weakform_arrays_struct)
@@ -3727,9 +3704,7 @@ function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
     delta_E = fkpl_arrays.delta_E
 
     # compute deltaF = F* - F^n, where F* is the Fnew from the uncorrected FP solve
-    # use Fsw as a dummy array (vpa,vperp,species)
-    # as this is now free after leaving newton_solve!()
-    delta_pdf = fkpl_arrays.Fsw
+    delta_pdf = fkpl_arrays.delta_pdf
     @inbounds begin
         for is in 1:species.n
             @views enforce_vpavperp_BCs!(pdf_new[:,:,is],vpa,vperp)
@@ -3788,7 +3763,7 @@ numerical conservation of the `density` in the collision operator.
 ```math
 C_{ss^\\prime} = C^\\ast_{ss}[F_s,F_{s^\\prime}] - x_0 F_s
 ```
-where \$C^\\ast_{ss}[F_s,F_{s^\\prime}]\$ is the weak-form collision operator computed using 
+where \$C^\\ast_{ss}[F_s,F_{s^\\prime}]\$ is the weak-form collision operator computed using
 the finite-element implementation.
 """
 function density_conserving_correction!(CC::AbstractArray{mk_float,2},
@@ -3797,13 +3772,13 @@ function density_conserving_correction!(CC::AbstractArray{mk_float,2},
                             vperp::finite_element_coordinate)
     # compute density of the input pdf
     dens =  get_density(pdf_in, vpa, vperp)
-    
+
     # compute density of the numerical collision operator
     dn = get_density(CC, vpa, vperp)
-    
+
     # obtain the coefficient for the correction
     x0 = dn/dens
-    
+
     # correct CC
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -3813,27 +3788,9 @@ function density_conserving_correction!(CC::AbstractArray{mk_float,2},
         end
     end
 end
-
 ##
 # element-wise integration function to get moments of C(vpa,vperp) without assembling C
 ##
-function get_collision_moments(pdf_in::AbstractArray{mk_float,2},
-    ms::mk_float, msp::mk_float, nussp::mk_float,
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
-    # call the lower level function after expanding some variables
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    YY_arrays = fkpl_arrays.YY_arrays
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dHdvpa = fkpl_arrays.dHdvpa
-    int_C_vec = integrate_collision_moments(pdf_in,d2Gdvpa2,d2Gdvperpdvpa,
-        d2Gdvperp2,dHdvpa,dHdvperp,ms,msp,nussp,
-        vpa,vperp,YY_arrays)
-    return int_C_vec
-end
 function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     nuref::mk_float,fkpl_arrays::fokkerplanck_weakform_arrays_struct)
     # call the lower level function after expanding some variables
@@ -3844,17 +3801,14 @@ function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     zeds = species.zeds
     YY_arrays = fkpl_arrays.YY_arrays
     # Rosenbluth potentials for each species
-    d2Gsdvperp2 = fkpl_arrays.d2Gsdvperp2
-    d2Gsdvpa2 = fkpl_arrays.d2Gsdvpa2
-    d2Gsdvperpdvpa = fkpl_arrays.d2Gsdvperpdvpa
-    dHsdvperp = fkpl_arrays.dHsdvperp
-    dHsdvpa = fkpl_arrays.dHsdvpa
+    rosenbluth_potentials_s = fkpl_arrays.rosenbluth_potentials_s
+    rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
     # Rosenbluth potentials for passing into function
-    d2Gdvperp2 = fkpl_arrays.d2Gdvperp2
-    d2Gdvpa2 = fkpl_arrays.d2Gdvpa2
-    d2Gdvperpdvpa = fkpl_arrays.d2Gdvperpdvpa
-    dHdvperp = fkpl_arrays.dHdvperp
-    dHdvpa = fkpl_arrays.dHdvpa
+    d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
+    d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
+    d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    dHdvperp = rosenbluth_potentials.dHdvperp
+    dHdvpa = rosenbluth_potentials.dHdvpa
     # moments of collisions for each cross-species pair
     delta_n_sp_s = fkpl_arrays.delta_n_sp_s
     delta_m_sp_s = fkpl_arrays.delta_m_sp_s
@@ -3862,29 +3816,22 @@ function calculate_collision_moments!(pdf_in::AbstractArray{mk_float,3},
     # moments of the pdf for each species
     density = fkpl_arrays.density
     upar = fkpl_arrays.upar
-    pressure = fkpl_arrays.pressure
-    ppar = fkpl_arrays.ppar
-    qpar = fkpl_arrays.qpar
-    rmom = fkpl_arrays.rmom
-    # collect the calculated moments
+    # collect the calculated moments needed for the calculation below
     for is in 1:species.n
         @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
         @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
-        @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-        @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
     end
     # collect the collision integrals
     for is in 1:species.n
         for isp in 1:species.n
             G_factor = (zeds[is]*zeds[isp]/mass[is])^2
             H_factor = ((zeds[is]*zeds[isp])^2)/(mass[is]*mass[isp])
-            @views @. d2Gdvperp2 = d2Gsdvperp2[:,:,isp]*G_factor
-            @views @. d2Gdvperpdvpa = d2Gsdvperpdvpa[:,:,isp]*G_factor
-            @views @. d2Gdvpa2 = d2Gsdvpa2[:,:,isp]*G_factor
-            @views @. dHdvpa = dHsdvpa[:,:,isp]*H_factor
-            @views @. dHdvperp = dHsdvperp[:,:,isp]*H_factor
+            rp = rosenbluth_potentials_s[isp]
+            @. d2Gdvperp2 = rp.d2Gdvperp2*G_factor
+            @. d2Gdvperpdvpa = rp.d2Gdvperpdvpa*G_factor
+            @. d2Gdvpa2 = rp.d2Gdvpa2*G_factor
+            @. dHdvpa = rp.dHdvpa*H_factor
+            @. dHdvperp = rp.dHdvperp*H_factor
             @views (int_C, int_vpa_C, int_vpa2_C, int_vperp2_C) = integrate_collision_moments(pdf_in[:,:,is],d2Gdvpa2,d2Gdvperpdvpa,
                 d2Gdvperp2,dHdvpa,dHdvperp,1.0,1.0,nuref,
                 vpa,vperp,YY_arrays)
@@ -3974,6 +3921,28 @@ function integrate_collision_moments(pdfs::AbstractArray{mk_float,2},
         end
     end
     return int_C_vec
+end
+
+function fokker_planck_collision_operator_solve!(
+                         CCssp::AbstractArray{mk_float,2},
+                         ffs_in::AbstractArray{mk_float,2},
+                         rosenbluth_potential_sp_in::rosenbluth_potential_data,
+                         ms::mk_float, msp::mk_float, nussp::mk_float,
+                         rhsvpavperp::AbstractArray{mk_float,2},
+                         lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},
+                         YY_arrays::YY_collision_operator_arrays,
+                         vpa::finite_element_coordinate, vperp::finite_element_coordinate)
+    # assemble the RHS of the collision operator matrix eq
+    assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
+            rosenbluth_potential_sp_in,ms,msp,nussp,vpa,vperp,YY_arrays)
+    # solve the collision operator matrix eq
+    # sc and rhsc are 1D views of the data in CC and rhsc, created so that we can use
+    # the 'matrix solve' functionality of ldiv!() from the LinearAlgebra package
+    sc = vec(CCssp)
+    rhsc = vec(rhsvpavperp)
+    # invert mass matrix and fill fc
+    ldiv!(sc, lu_obj_MM, rhsc)
+    return nothing
 end
 
 end

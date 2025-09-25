@@ -51,12 +51,11 @@ function calculate_total_energy(moments::moments_struct,species::species_info)
     end
     return total_energy
 end
-function calculate_total_change(fkpl_arrays)
+function calculate_total_change(CCs,fkpl_arrays)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     mass = species.mass
-    CCs = fkpl_arrays.CCs
     total_momentum_change = 0.0
     total_energy_change = 0.0
     for is in 1:species.n
@@ -66,7 +65,8 @@ function calculate_total_change(fkpl_arrays)
     return total_momentum_change, total_energy_change
 end
 
-function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
+function get_moments(pdf::AbstractArray{mk_float,2},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct,mass::mk_float)
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -80,44 +80,8 @@ function get_moments(pdf::AbstractArray{mk_float,2},fkpl_arrays,mass::mk_float)
     return dens, upar, vth, pressure, ppar, qpar, rmom
 end
 
-function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
-                    pdf_exact::AbstractArray{mk_float,2},
-                    pdf_dummy_1::AbstractArray{mk_float,2},
-                    pdf_dummy_2::AbstractArray{mk_float,2},
-                    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
-                    time::mk_float,
-                    mass::mk_float,
-                    it::mk_int)
-    # extract coordinates
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
-    dens, upar, vth, pressure, ppar, qpar, rmom = get_moments(pdf,fkpl_arrays,mass)
-    @inbounds begin
-        for ivperp in 1:vperp.n
-            for ivpa in 1:vpa.n
-                pdf_exact[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-            end
-        end
-    end
-    println("it = ", it, " time: ", time)
-    print_test_data(pdf_exact,pdf,pdf_dummy_1,"F",vpa,vperp,pdf_dummy_2;print_to_screen=true)
-    println("dens: ", dens)
-    println("upar: ", upar)
-    println("vth: ", vth)
-    println("ppar: ", ppar)
-    println("qpar: ", qpar)
-    println("rmom: ", rmom)
-    dSdt = calculate_entropy_production(pdf,fkpl_arrays)
-    println("dSdt: ", dSdt)
-    if vpa.bc == zero_boundary_condition
-        println("test vpa bc: F[1, :]", pdf[1, :])
-        println("test vpa bc: F[end, :]", pdf[end, :])
-    end
-    if vperp.bc == zero_boundary_condition
-        println("test vperp bc: F[:, end]", pdf[:, end])
-    end
-end
-function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
+function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
+                    pdf::AbstractArray{mk_float,3},
                     pdf_exact::AbstractArray{mk_float,3},
                     pdf_dummy_1::AbstractArray{mk_float,2},
                     pdf_dummy_2::AbstractArray{mk_float,2},
@@ -159,8 +123,8 @@ function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,3},
     # println("rmom: ", moments.rmom)
     total_parallel_momentum = calculate_total_parallel_momentum(moments,species)
     total_energy = calculate_total_energy(moments,species)
-    dSdt = calculate_entropy_production(pdf,fkpl_arrays)
-    delta_momentum_C, delta_energy_C = calculate_total_change(fkpl_arrays)
+    dSdt = calculate_entropy_production(CC,pdf,fkpl_arrays)
+    delta_momentum_C, delta_energy_C = calculate_total_change(CC,fkpl_arrays)
     if it == 0
         # store conserved quantities
         moments.conserved[1:species.n] .= moments.density
@@ -284,29 +248,6 @@ function print_grid(coord)
     return nothing
 end
 
-function print_pdf(pdf::AbstractArray{mk_float,3})
-    println("# Expected Fout")
-    print("[")
-    nvpa, nvperp, ntind = size(pdf)
-    for k in 1:ntind
-        for i in 1:nvpa-1
-            for j in 1:nvperp-1
-                @printf("%.15f ", pdf[i,j,k])
-            end
-            @printf("%.15f ", pdf[i,nvperp,k])
-            print(";\n")
-        end
-        for j in 1:nvperp-1
-            @printf("%.15f ", pdf[nvpa,j,k])
-        end
-        @printf("%.15f ", pdf[nvpa,nvperp,k])
-        if k < ntind
-            print(";;;\n")
-        end
-    end
-    print("]\n")
-    return nothing
-end
 function print_pdf(pdf::AbstractArray{mk_float,4})
     println("# Expected Fout")
     print("[")
@@ -336,8 +277,8 @@ function print_pdf(pdf::AbstractArray{mk_float,4})
     return nothing
 end
 
-struct pdf_and_grid{N}
+struct pdf_and_grid
     vpa_grid::Vector{mk_float}
     vperp_grid::Vector{mk_float}
-    pdf::AbstractArray{mk_float,N}
+    pdf::AbstractArray{mk_float,4}
 end

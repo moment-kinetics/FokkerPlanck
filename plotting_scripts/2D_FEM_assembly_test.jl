@@ -8,7 +8,6 @@ import FokkerPlanck
 using FokkerPlanck.array_allocation: allocate_float
 using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs
 using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: init_fokker_planck_collisions
 using FokkerPlanck: fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp
@@ -91,9 +90,10 @@ end
         start_init_time = now()
         species = species_info([1.0],[1.0])
         fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option)
-        KKpar2D_with_BC_terms_sparse = fkpl_arrays.KKpar2D_with_BC_terms_sparse
-        KKperp2D_with_BC_terms_sparse = fkpl_arrays.KKperp2D_with_BC_terms_sparse
-        lu_obj_MM = fkpl_arrays.lu_obj_MM
+        matrix_operators = fkpl_arrays.fprp_solver_data.matrix_operators
+        KKpar2D_with_BC_terms_sparse = matrix_operators.KKpar2D_with_BC_terms_sparse
+        KKperp2D_with_BC_terms_sparse = matrix_operators.KKperp2D_with_BC_terms_sparse
+        lu_obj_MM = matrix_operators.lu_obj_MM
         finish_init_time = now()
         
         fvpavperp = Array{mk_float,2}(undef,vpa.n,vperp.n)
@@ -217,36 +217,33 @@ end
               d2Gdvperpdvpa_M_exact,d2Gdvpa2_M_exact,vpa,vperp)
         println("begin C calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
         
-        fokker_planck_collision_operator_weak_form!(Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
+        fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
                                              use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients,
                                              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                                              calculate_GG = false, calculate_dGdvperp=false)
         if test_numerical_conserving_terms && test_self_operator
             # enforce the boundary conditions on CC before it is used for timestepping
-            enforce_vpavperp_BCs!(fkpl_arrays.CC,vpa,vperp)
+            enforce_vpavperp_BCs!(C_M_num,vpa,vperp)
             # make ad-hoc conserving corrections
-            conserving_corrections!(fkpl_arrays.CC,Fs_M,fkpl_arrays)
-            #conserving_corrections!(fkpl_arrays.CC,Fs_M,vpa,vperp)
+            conserving_corrections!(C_M_num,Fs_M,fkpl_arrays)
         end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
-        calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.GG,fkpl_arrays.HH,fkpl_arrays.dHdvpa,fkpl_arrays.dHdvperp,
-             fkpl_arrays.d2Gdvpa2,fkpl_arrays.dGdvperp,fkpl_arrays.d2Gdvperpdvpa,fkpl_arrays.d2Gdvperp2,F_M,
-             vpa,vperp,fkpl_arrays,msp;
+        calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.rosenbluth_potentials,F_M,
+             vpa,vperp,fkpl_arrays.fprp_solver_data,msp;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=true,calculate_dGdvperp=true)
         # extract C[Fs,Fs'] result
         # and Rosenbluth potentials for testing
         @inbounds begin
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    C_M_num[ivpa,ivperp] = fkpl_arrays.CC[ivpa,ivperp]
-                    G_M_num[ivpa,ivperp] = fkpl_arrays.GG[ivpa,ivperp]
-                    H_M_num[ivpa,ivperp] = fkpl_arrays.HH[ivpa,ivperp]
-                    dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.dHdvpa[ivpa,ivperp]
-                    dHdvperp_M_num[ivpa,ivperp] = fkpl_arrays.dHdvperp[ivpa,ivperp]
-                    dGdvperp_M_num[ivpa,ivperp] = fkpl_arrays.dGdvperp[ivpa,ivperp]
-                    d2Gdvperp2_M_num[ivpa,ivperp] = fkpl_arrays.d2Gdvperp2[ivpa,ivperp]
-                    d2Gdvpa2_M_num[ivpa,ivperp] = fkpl_arrays.d2Gdvpa2[ivpa,ivperp]
-                    d2Gdvperpdvpa_M_num[ivpa,ivperp] = fkpl_arrays.d2Gdvperpdvpa[ivpa,ivperp]
+                    G_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.GG[ivpa,ivperp]
+                    H_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.HH[ivpa,ivperp]
+                    dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvpa[ivpa,ivperp]
+                    dHdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvperp[ivpa,ivperp]
+                    dGdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dGdvperp[ivpa,ivperp]
+                    d2Gdvperp2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperp2[ivpa,ivperp]
+                    d2Gdvpa2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvpa2[ivpa,ivperp]
+                    d2Gdvperpdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperpdvpa[ivpa,ivperp]
                 end
             end
         end
@@ -259,7 +256,7 @@ end
         # test the boundary data calculation
         if !use_Maxwellian_Rosenbluth_coefficients
             max_H_err, max_dHdvpa_err, max_dHdvperp_err, max_G_err, max_dGdvperp_err,
-            max_d2Gdvperp2_err, max_d2Gdvperpdvpa_err, max_d2Gdvpa2_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.rpbd,rpbd_exact,vpa,vperp)
+            max_d2Gdvperp2_err, max_d2Gdvperpdvpa_err, max_d2Gdvpa2_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_solver_data.rpbd,rpbd_exact,vpa,vperp)
         end
         dummy_array = Array{mk_float,2}(undef,vpa.n,vperp.n)
         fkerr.H_M.max, fkerr.H_M.L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array)
@@ -273,7 +270,7 @@ end
         fkerr.C_M.max, fkerr.C_M.L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array)
         
         # calculate the entropy production
-        lnfC = fkpl_arrays.rhsvpavperp
+        lnfC = matrix_operators.rhsvpavperp
         @inbounds begin
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
