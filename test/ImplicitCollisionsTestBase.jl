@@ -10,7 +10,7 @@ using FokkerPlanck.coordinates: scalar_coordinate_inputs,
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_qpar, get_rmom
 using FokkerPlanck.fokker_planck_calculus: species_info
-using FiniteElementMatrices: element_coordinates
+using FokkerPlanck: element_coordinates # from FiniteElementMatrices, re-exported via FokkerPlanck
 using Printf
 
 struct moments_struct

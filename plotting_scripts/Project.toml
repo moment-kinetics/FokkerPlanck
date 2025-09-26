@@ -1,5 +1,4 @@
 [deps]
-FiniteElementMatrices = "21a267ae-cf5f-40e4-86cc-2968ca96a734"
 FokkerPlanck = "6a6b5c72-6869-4c05-b853-2893d318cc38"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 Measures = "442fdcdd-2543-5da2-b0f3-8c86c306513e"
