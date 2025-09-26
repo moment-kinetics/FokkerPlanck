@@ -81,7 +81,7 @@ atol = 1.0e-13
             output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
             vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
                 ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
-                test_external_chebyshev_grid=false, continuous_integration_test=true,
+                test_external_chebyshev_grid=false, test_type=continuous_integration_test,
                 test_input_array_type=test_input_array_type)
             @test isapprox(expected_gausslegendre.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
             @test isapprox(expected_gausslegendre.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
@@ -95,7 +95,7 @@ atol = 1.0e-13
         output_pdf_and_grid = test_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
            vth0=0.5,vperp0=1.0,vpa0=0.1, nelement_vpa=6,nelement_vperp=3,Lvpa=8.0,Lvperp=4.0, bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=50, delta_t = 1.0, ngrid=3, test_linearised_advance=false, print_diagnostics=false, print_timing=false,
-            test_external_chebyshev_grid=true, continuous_integration_test=true)
+            test_external_chebyshev_grid=true, test_type=continuous_integration_test)
         @test isapprox(expected_chebyshev.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
         @test isapprox(expected_chebyshev.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
         for it in 1:2
@@ -442,7 +442,7 @@ atol = 1.0e-13
                nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
                bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
                ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false,
-               atol=1.0e-10, nonlinear_max_iterations=20, continuous_integration_test=true,
+               atol=1.0e-10, nonlinear_max_iterations=20, test_type=continuous_integration_test,
                print_diagnostics=false, print_timing=false, test_input_array_type=test_input_array_type)
             @test isapprox(expected_gausslegendre_nspecies_1.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
             @test isapprox(expected_gausslegendre_nspecies_1.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
@@ -456,7 +456,7 @@ atol = 1.0e-13
             nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
             bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false, atol=1.0e-10, nonlinear_max_iterations=20,
-            continuous_integration_test=true, print_diagnostics=false, print_timing=false)
+            test_type=continuous_integration_test, print_diagnostics=false, print_timing=false)
         @test isapprox(expected_gausslegendre_nspecies_2.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
         @test isapprox(expected_gausslegendre_nspecies_2.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
         for it in 1:2
@@ -467,7 +467,7 @@ atol = 1.0e-13
             vth0=[0.5, 0.5, 0.5],vperp0=[1.0, 1.0, 1.0],vpa0=[1.0,0.1,-0.5],mass=[0.5,1.0,2.0],zeds=[-1.0,1.0,2.0],zbeam=[0.0,0.5,0.1],density_in=[1.0,2.0/3.0,1.0/3.0],nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
             bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false, atol=1.0e-10, nonlinear_max_iterations=20,
-            continuous_integration_test=true, print_diagnostics=false, print_timing=false)
+            test_type=continuous_integration_test, print_diagnostics=false, print_timing=false)
         @test isapprox(expected_gausslegendre_nspecies_3.vpa_grid[:], output_pdf_and_grid.vpa_grid[:], atol=atol)
         @test isapprox(expected_gausslegendre_nspecies_3.vperp_grid[:], output_pdf_and_grid.vperp_grid[:], atol=atol)
         for it in 1:2

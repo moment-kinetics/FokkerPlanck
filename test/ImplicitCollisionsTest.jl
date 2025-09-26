@@ -7,7 +7,12 @@ using FokkerPlanck: fokker_plack_backward_euler_data,
                     fokkerplanck_weakform_arrays_struct,
                     multipole_expansion, delta_f_multipole, boundary_data_type,
                     multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
-
+# enum for controlling return data from test functions
+@enum CollisionTestReturnType begin
+    continuous_integration_test # if ci test, return initial and final pdfs for regression testing
+    timing_test # return timing data
+    interactive_test # return nothing
+end
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
 function test_implicit_collisions(;
@@ -32,8 +37,7 @@ function test_implicit_collisions(;
     multi_species_operator_option=repeat_assembly_per_species::multi_species_operator_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
-    # if ci test, return initial and final pdfs for regression testing
-    continuous_integration_test=false::Bool,
+    test_type=interactive_test::CollisionTestReturnType,
     # if external user, may pass a slice of an array into functions
     test_input_array_type=false::Bool)
     vth0_range = [vth0 for is in 1:nspecies]
@@ -68,8 +72,7 @@ function test_implicit_collisions(;
         multi_species_operator_option=multi_species_operator_option,
         test_external_chebyshev_grid=test_external_chebyshev_grid,
         print_diagnostics=print_diagnostics, print_timing=print_timing,
-        # if ci test, return initial and final pdfs for regression testing
-        continuous_integration_test=continuous_integration_test,
+        test_type=test_type,
         # if external user, may pass a slice of an array into functions
         test_input_array_type=test_input_array_type)
 end
@@ -99,8 +102,7 @@ function test_multispecies_implicit_collisions(;
     multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
-    # if ci test, return initial and final pdfs for regression testing
-    continuous_integration_test=false::Bool,
+    test_type=interactive_test::CollisionTestReturnType,
     # if external user, may pass a slice of an array into functions
     test_input_array_type=false::Bool)
 
@@ -204,19 +206,23 @@ function test_multispecies_implicit_collisions(;
     # store final pdf for output
     Fout[:,:,:,2] .= Fold
     # println("total newton iterations: ", fkpl_arrays.nl_solver_data.nonlinear_iterations[])
+    init_time = Dates.value(finish_init_time - start_init_time)
+    run_time = Dates.value(finish_run_time - finish_init_time)
     if print_timing
         # print some timing information
-        println("init time (ms): ", Dates.value(finish_init_time - start_init_time))
-        println("run time (ms): ", Dates.value(finish_run_time - finish_init_time))
+        println("init time (ms): ", init_time)
+        println("run time (ms): ", run_time)
     end
     # to make this function testable
-    if continuous_integration_test
+    if test_type == continuous_integration_test
         # uncomment to update tests
         # print_grid(vpa)
         # print_grid(vperp)
         # print_pdf(Fout)
         return pdf_and_grid(vpa.grid,vperp.grid,Fout)
-    else
+    elseif test_type == timing_test
+        return init_time, run_time
+    else # interactive_test
         return nothing
     end
 end
