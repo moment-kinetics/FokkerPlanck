@@ -23,7 +23,7 @@ function save_timing_data(filename, nspecies_list,
 end
 
 function test_implicit_collisions_timing(;nspecies_list = [1,2,3,4,5,10],
-        save_HDF5=true)
+        save_HDF5=true, test_numerical_conserving_terms=true)
     ntests = length(nspecies_list)
     init_times_single = zeros(ntests)
     run_times_single = zeros(ntests)
@@ -48,7 +48,7 @@ function test_implicit_collisions_timing(;nspecies_list = [1,2,3,4,5,10],
             atol = 1.0e-10, rtol = 1.0e-10,
             nonlinear_max_iterations = 20, test_particle_preconditioner=true,
             # model options
-            test_numerical_conserving_terms=true,
+            test_numerical_conserving_terms=test_numerical_conserving_terms,
             boundary_data_option=delta_f_multipole,
             multi_species_operator_option=single_assembly_per_species,
             test_type=timing_test,
@@ -69,7 +69,7 @@ function test_implicit_collisions_timing(;nspecies_list = [1,2,3,4,5,10],
             atol = 1.0e-10, rtol = 1.0e-10,
             nonlinear_max_iterations = 20, test_particle_preconditioner=true,
             # model options
-            test_numerical_conserving_terms=true,
+            test_numerical_conserving_terms=test_numerical_conserving_terms,
             boundary_data_option=delta_f_multipole,
             multi_species_operator_option=repeat_assembly_per_species,
             test_type=timing_test,
