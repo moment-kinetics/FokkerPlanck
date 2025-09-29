@@ -28,5 +28,5 @@ jobs:
       # https://github.com/julia-actions/julia-runtest/blob/master/action.yml
       # in order to pass customised arguments to `Pkg.test()`
       - run: |
-          julia --check-bounds=yes --color=yes --depwarn=yes --project=./plotting_scripts/ -e 'using Pkg; Pkg.instantiate(); include("plotting_scripts/2D_FEM_assembly_test.jl"); run_assembly_test(); include("plotting_scripts/fkpl_direct_integration_test.jl"); test_rosenbluth_potentials_direct_integration()'
+          julia --check-bounds=yes --color=yes --depwarn=yes --project=./plotting_scripts/ -e 'using Pkg; Pkg.instantiate(); include("plotting_scripts/2D_FEM_assembly_test.jl"); run_assembly_test(); include("plotting_scripts/fkpl_direct_integration_test.jl"); test_rosenbluth_potentials_direct_integration(); include("plotting_scripts/multi_species_timing.jl"); test_implicit_collisions_timing(nspecies_list=[1,2])'
         shell: bash
