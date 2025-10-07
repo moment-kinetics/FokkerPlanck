@@ -5,14 +5,19 @@ using FokkerPlanck: fokker_plack_backward_euler_data,
                     fokker_planck_collisions_backward_euler_step!,
                     fokker_planck_collision_operator_weak_form!,
                     fokkerplanck_weakform_arrays_struct,
-                    multipole_expansion, boundary_data_type,
+                    multipole_expansion, delta_f_multipole, boundary_data_type,
                     multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
-
+# enum for controlling return data from test functions
+@enum CollisionTestReturnType begin
+    continuous_integration_test # if ci test, return initial and final pdfs for regression testing
+    timing_test # return timing data
+    interactive_test # return nothing
+end
 # provides functions for test below to keep this script concise
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
 function test_implicit_collisions(;
     # initial pdf info
-    vth0=0.5::mk_float, vperp0=1.0::mk_float, vpa0=0.0::mk_float, zbeam=0.0::mk_float,
+    vth0=0.5::mk_float, vperp0=1.0::mk_float, vpa0=0.0::mk_float, zbeam=0.0::mk_float, nspecies=1::mk_int,
     # grid info
     ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
     Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
@@ -29,17 +34,24 @@ function test_implicit_collisions(;
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
     test_numerical_conserving_terms=false::Bool,
     boundary_data_option=multipole_expansion::boundary_data_type,
+    multi_species_operator_option=repeat_assembly_per_species::multi_species_operator_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
-    # if ci test, return initial and final pdfs for regression testing
-    continuous_integration_test=false::Bool,
+    test_type=interactive_test::CollisionTestReturnType,
     # if external user, may pass a slice of an array into functions
     test_input_array_type=false::Bool)
+    vth0_range = [vth0 for is in 1:nspecies]
+    vperp0_range = [vperp0 for is in 1:nspecies]
+    vpa0_range = [vpa0 for is in 1:nspecies]
+    zbeam_range = [zbeam for is in 1:nspecies]
+    mass_range = [1.0 for is in 1:nspecies]
+    zeds_range = [1.0 for is in 1:nspecies]
+    density_range = [1.0/nspecies for is in 1:nspecies]
     return test_multispecies_implicit_collisions(;
         # initial pdf info
-        vth0=[vth0], vperp0=[vperp0], vpa0=[vpa0], zbeam=[zbeam],
+        vth0=vth0_range, vperp0=vperp0_range, vpa0=vpa0_range, zbeam=zbeam_range,
         # species info
-        mass=[1.0], zeds=[1.0], density_in=[1.0],
+        mass=mass_range, zeds=zeds_range, density_in=density_range,
         # grid info
         ngrid=ngrid, nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
         Lvpa=Lvpa, Lvperp=Lvperp,
@@ -57,11 +69,10 @@ function test_implicit_collisions(;
         test_numerical_conserving_terms=test_numerical_conserving_terms,
         test_numerical_conserving_terms_on_C=test_numerical_conserving_terms,
         boundary_data_option=boundary_data_option,
-        multi_species_operator_option=repeat_assembly_per_species,
+        multi_species_operator_option=multi_species_operator_option,
         test_external_chebyshev_grid=test_external_chebyshev_grid,
         print_diagnostics=print_diagnostics, print_timing=print_timing,
-        # if ci test, return initial and final pdfs for regression testing
-        continuous_integration_test=continuous_integration_test,
+        test_type=test_type,
         # if external user, may pass a slice of an array into functions
         test_input_array_type=test_input_array_type)
 end
@@ -91,8 +102,7 @@ function test_multispecies_implicit_collisions(;
     multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
     test_external_chebyshev_grid=false::Bool,
     print_diagnostics=true::Bool, print_timing=true::Bool,
-    # if ci test, return initial and final pdfs for regression testing
-    continuous_integration_test=false::Bool,
+    test_type=interactive_test::CollisionTestReturnType,
     # if external user, may pass a slice of an array into functions
     test_input_array_type=false::Bool)
 
@@ -196,19 +206,23 @@ function test_multispecies_implicit_collisions(;
     # store final pdf for output
     Fout[:,:,:,2] .= Fold
     # println("total newton iterations: ", fkpl_arrays.nl_solver_data.nonlinear_iterations[])
+    init_time = Dates.value(finish_init_time - start_init_time)
+    run_time = Dates.value(finish_run_time - finish_init_time)
     if print_timing
         # print some timing information
-        println("init time (ms): ", Dates.value(finish_init_time - start_init_time))
-        println("run time (ms): ", Dates.value(finish_run_time - finish_init_time))
+        println("init time (ms): ", init_time)
+        println("run time (ms): ", run_time)
     end
     # to make this function testable
-    if continuous_integration_test
+    if test_type == continuous_integration_test
         # uncomment to update tests
         # print_grid(vpa)
         # print_grid(vperp)
         # print_pdf(Fout)
         return pdf_and_grid(vpa.grid,vperp.grid,Fout)
-    else
+    elseif test_type == timing_test
+        return init_time, run_time
+    else # interactive_test
         return nothing
     end
 end

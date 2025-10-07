@@ -63,7 +63,11 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
-
+# use and export element_coordinates so that users of the
+# coordinate definition interface do not have to
+# also know to install FiniteElementMatrices
+using FiniteElementMatrices: element_coordinates
+export element_coordinates
 """
 Function for evaluating \$C_{ss'} = C_{ss'}[F_s,F_{s'}]\$
 
