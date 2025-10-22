@@ -18,6 +18,7 @@ struct moments_struct
     upar::Vector{mk_float}
     vth::Vector{mk_float}
     pressure::Vector{mk_float}
+    temperature::Vector{mk_float}
     ppar::Vector{mk_float}
     qpar::Vector{mk_float}
     rmom::Vector{mk_float}
@@ -27,11 +28,13 @@ struct moments_struct
         upar = allocate_float(nspecies)
         vth = allocate_float(nspecies)
         pressure = allocate_float(nspecies)
+        temperature = allocate_float(nspecies)
         ppar = allocate_float(nspecies)
         qpar = allocate_float(nspecies)
         rmom = allocate_float(nspecies)
         conserved = allocate_float(nspecies+2)
-        return new(density, upar, vth, pressure, ppar, qpar, rmom, conserved)
+        return new(density, upar, vth, pressure,
+            temperature, ppar, qpar, rmom, conserved)
     end
 end
 
@@ -71,13 +74,18 @@ function get_moments(pdf::AbstractArray{mk_float,2},
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     dens = get_density(pdf,vpa,vperp)
-    upar = get_upar(pdf, vpa, vperp, dens)
-    pressure = get_pressure(pdf, vpa, vperp, upar, mass)
-    vth = sqrt(2.0*pressure/(dens*mass))
-    ppar = get_ppar(pdf, vpa, vperp, upar, mass)
-    qpar = get_qpar(pdf, vpa, vperp, upar, mass)
-    rmom = get_rmom(pdf, vpa, vperp, upar, mass)
-    return dens, upar, vth, pressure, ppar, qpar, rmom
+    if abs(dens) < 1.0e-14
+        upar, pressure, temperature, vth, ppar, qpar, rmom = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    else
+        upar = get_upar(pdf, vpa, vperp, dens)
+        pressure = get_pressure(pdf, vpa, vperp, upar, mass)
+        temperature = pressure/dens
+        vth = sqrt(2.0*pressure/(dens*mass))
+        ppar = get_ppar(pdf, vpa, vperp, upar, mass)
+        qpar = get_qpar(pdf, vpa, vperp, upar, mass)
+        rmom = get_rmom(pdf, vpa, vperp, upar, mass)
+    end
+    return dens, upar, vth, pressure, temperature, ppar, qpar, rmom
 end
 
 function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
@@ -88,7 +96,7 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
                     fkpl_arrays::fokkerplanck_weakform_arrays_struct,
                     moments::moments_struct,
                     time::mk_float,
-                    it::mk_int)
+                    it::mk_int; updated_CC=true)
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -99,6 +107,7 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
             moments.upar[is],
             moments.vth[is],
             moments.pressure[is],
+            moments.temperature[is],
             moments.ppar[is],
             moments.qpar[is],
             moments.rmom[is] = @views get_moments(pdf[:,:,is],fkpl_arrays,species.mass[is])
@@ -114,7 +123,7 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
     end
     println("it = ", it, " time: ", time)
     for is in 1:species.n
-        @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]",vpa,vperp,pdf_dummy_2;print_to_screen=true)
+        @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]_Maxwellian",vpa,vperp,pdf_dummy_2;print_to_screen=true)
     end
     # println("upar: ", moments.upar)
     # println("vth: ", moments.vth)
@@ -133,14 +142,17 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
     end
     println("dens: ", moments.density)
     println("upar: ", moments.upar)
-    println("temp: ", moments.pressure./moments.density)
+    println("temp: ", moments.temperature)
     println("parallel momentum: ", total_parallel_momentum)
     println("total energy: ", total_energy)
-    println("dSdt: ", dSdt)
     println("delta density: ", moments.density .- moments.conserved[1:species.n])
     println("delta momentum: ", total_parallel_momentum - moments.conserved[species.n+1])
     println("delta energy: ", total_energy - moments.conserved[species.n+2])
-    println("delta_momentum_C: ",delta_momentum_C, " delta_energy_C: ", delta_energy_C)
+    if updated_CC
+        println("dSdt: ", dSdt)
+        println("delta_momentum_C: ",delta_momentum_C)
+        println("delta_energy_C: ", delta_energy_C)
+    end
     if vpa.bc == zero_boundary_condition
         for is in 1:species.n
             println("test vpa bc: F[1, :, $is]", pdf[1, :, is])
