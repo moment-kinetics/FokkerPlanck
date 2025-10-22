@@ -42,13 +42,15 @@ export calculate_entropy_production
 export fokker_planck_collisions_backward_euler_step!
 # fixed background plasma inputs
 export fixed_background_plasma_input
+# source inputs
+export slowing_down_source_data_input
 
 using Dates
 using LinearAlgebra: lu, ldiv!
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
 using ..velocity_moments: get_density, get_upar, get_pressure
-using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plack_backward_euler_data,
+using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_planck_backward_euler_data,
                                 fokker_planck_collision_operator_solve!,
                                 enforce_vpavperp_BCs!,
                                 calculate_rosenbluth_potentials_via_elliptic_solve!,
@@ -59,7 +61,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plac
                                 conserving_corrections!, density_conserving_correction!,
                                 species_info, calculate_cross_species_rosenbluth_potential_sums!,
                                 multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species,
-                                fixed_background_plasma_input
+                                fixed_background_plasma_input, slowing_down_source_data_input,
+                                slowing_down_source!, slowing_down_sink!, add_slowing_down_source!
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -303,7 +306,6 @@ function calculate_entropy_production(
     return dSdt
 end
 
-
 ######################################################
 # end functions associated with the weak-form operator
 # where the potentials are computed by elliptic solve
@@ -315,16 +317,20 @@ end
 
 function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_float,3},
                         delta_t::mk_float, nuref::mk_float,
-                        fkpl_arrays::fokker_plack_backward_euler_data;
+                        fkpl_arrays::fokker_planck_backward_euler_data;
                         use_conserving_corrections=true::Bool,
                         use_conserving_corrections_on_C=true::Bool,
                         test_linearised_advance=false::Bool,
                         test_particle_preconditioner=true::Bool,
-                        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool)
+                        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
+                        update_test_particle_preconditioner=true::Bool)
     CCs = fkpl_arrays.CCs
+    source = fkpl_arrays.source
     species = fkpl_arrays.fp_operator.species
     vperp = fkpl_arrays.fp_operator.vperp
     vpa = fkpl_arrays.fp_operator.vpa
+    YY_arrays = fkpl_arrays.fp_operator.YY_arrays
+    source_data = fkpl_arrays.source_data
     # residual function to be used for Newton-Krylov
     # residual(vpa, vperp, species) = F^(n+1) - F^n - dt * C[F^n+1,F^n+1]
     function residual_func!(Fresidual, Fnew; krylov=false)
@@ -332,11 +338,16 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
                         Fnew, nuref,
                         fkpl_arrays.fp_operator;
                         use_conserving_corrections=(use_conserving_corrections && use_conserving_corrections_on_C))
+        @. source = 0.0 # set source to zero initially, in case source_data=nothing
+        slowing_down_source!(source, fkpl_arrays.fp_operator, source_data)
+        slowing_down_sink!(source, Fnew, fkpl_arrays.fp_operator, source_data)
+        # N.B. residual function below is defined to be Residual =  dF/dt - RHS
+        # evaluated for data at the collocation points, i.e., not in weak form.
         @inbounds begin
             for is in 1:species.n
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        Fresidual[ivpa,ivperp,is] = Fnew[ivpa,ivperp,is] - Fold[ivpa,ivperp,is] - delta_t * (CCs[ivpa,ivperp,is])
+                        Fresidual[ivpa,ivperp,is] = Fnew[ivpa,ivperp,is] - Fold[ivpa,ivperp,is] - delta_t * (CCs[ivpa,ivperp,is] + source[ivpa,ivperp,is])
                     end
                 end
             end
@@ -350,9 +361,10 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         # such that K * F^n+1 = M * F^n advances the linearised collision operator due
         # to test particle collisions only (differential piece of C).
         # CC2D_sparse is the approximate Jacobian for the residual Fresidual.
-        calculate_test_particle_preconditioner!(Fold,delta_t,nuref,fkpl_arrays,
+        if update_test_particle_preconditioner
+            calculate_test_particle_preconditioner!(Fold,delta_t,nuref,fkpl_arrays,
                     use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients_in_preconditioner)
-
+        end
         function test_particle_precon!(x)
             # let K * dF = C[dF,F^n]
             # function to solve K * F^n+1 = M * F^n
@@ -377,7 +389,10 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
         end
     end
     if test_linearised_advance
+        add_slowing_down_source!(Fnew, fkpl_arrays.Fsw,
+            fkpl_arrays.fp_operator, source_data, delta_t)
         test_particle_precon!(Fnew)
+        success = true
     else
         nl_solver_params = fkpl_arrays.nl_solver_data_s
         Fresidual = fkpl_arrays.Fs_residual
@@ -393,6 +408,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
             @views enforce_vpavperp_BCs!(Fnew[:,:,is],vpa,vperp)
         end
         # should only introduce error of order ~ atol
+        # so long as the system is closed, i.e., no sources and sinks or fixed species
         if use_conserving_corrections
             # ad-hoc end-of-step corrections, again introducing only ~atol error
             # correct Fnew = F^n+1 - F^n so it has no change in moments n,
@@ -401,7 +417,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_fl
             # this introduces errors of the size of the distance between F^n+1 and the
             # "correct" root that should have been found by the iterative solve, i.e.,
             # errors of size ~ atol.
-            conserving_corrections!(Fnew, Fold, fkpl_arrays.fp_operator)
+            conserving_corrections!(Fnew, Fold, fkpl_arrays.fp_operator, source_data)
         end
     end
     return success

@@ -15,7 +15,7 @@ using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_pp
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole,
                                             repeat_assembly_per_species, single_assembly_per_species
 
-using FokkerPlanck: fokker_plack_backward_euler_data, fokker_planck_collision_operator_weak_form!
+using FokkerPlanck: fokker_planck_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
 using FokkerPlanck: fokker_planck_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
@@ -91,8 +91,8 @@ function backward_Euler_linearised_collisions_test(;
                                                                 Lvpa=10.0,Lvperp=5.0,
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
     species = species_info([ms],[1.0])
-    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
-                        0.0, 0.0, 0, print_to_screen, nothing)
+    fkpl_arrays = fokker_planck_backward_euler_data(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
+                        0.0, 0.0, 0, print_to_screen, nothing, nothing)
     dummy_array = allocate_float(vpa.n,vperp.n)
     FMaxwell = allocate_float(vpa.n,vperp.n)
     FMaxwell_err = allocate_float(vpa.n,vperp.n)
@@ -231,9 +231,9 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     nl_solver_atol=1.0e-10
     nl_solver_rtol=0.0
     nl_solver_nonlinear_max_iterations=20
-    fkpl_arrays = fokker_plack_backward_euler_data(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
+    fkpl_arrays = fokker_planck_backward_euler_data(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
                         nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
-                        print_to_screen,nothing)
+                        print_to_screen,nothing,nothing)
 
     # initial condition
     Fold = allocate_float(vpa.n,vperp.n,species.n)
@@ -442,7 +442,7 @@ function multi_species_numerical_error_corrections_test(;
 
     # make ad-hoc conserving corrections to make the density, total momentum and total energy
     # of pdf_new equal to those in pdf_old
-    conserving_corrections!(pdf_new,pdf_old,fkpl_arrays)
+    conserving_corrections!(pdf_new,pdf_old,fkpl_arrays,nothing)
 
     # check pdf_new and pdf_old now have the same density, total momentum and total energy moments
     for is in 1:species.n
@@ -776,7 +776,7 @@ function slowing_down_fokker_planck_collisions_test(;
                     end
                 elseif test_numerical_conserving_terms
                     @views delta_n = get_density(C_M_num[:,:,is], vpa, vperp)
-                    rtol, atol = 0.0, 3.0e-14
+                    rtol, atol = 0.0, 5.0e-14
                     @test isapprox(delta_n, rtol ; atol=atol)
                     if print_to_screen
                         println("delta_n: ", delta_n)

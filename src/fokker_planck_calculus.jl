@@ -13,7 +13,7 @@ export calculate_rosenbluth_potential_boundary_data_multipole!
 export calculate_rosenbluth_potential_boundary_data_delta_f_multipole!
 export fokkerplanck_arrays_direct_integration_struct
 export fokkerplanck_weakform_arrays_struct
-export fokker_plack_backward_euler_data
+export fokker_planck_backward_euler_data
 export enforce_vpavperp_BCs!
 export calculate_rosenbluth_potentials_via_elliptic_solve!
 export calculate_rosenbluth_potentials_via_analytical_Maxwellian!
@@ -28,7 +28,10 @@ export matrix_inverse
 export multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 export calculate_collision_moments!
 export fokker_planck_collision_operator_solve!
-export fixed_background_plasma_input
+export fixed_background_plasma_input,
+    slowing_down_source_data_input,
+    slowing_down_source!, slowing_down_sink!,
+    add_slowing_down_source!
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
@@ -955,10 +958,164 @@ struct fokkerplanck_weakform_arrays_struct
     end
 end
 
-struct fokker_plack_backward_euler_data
+struct slowing_down_source_data_input
+    source_rate::Array{mk_float,1}
+    source_vth::Array{mk_float,1}
+    source_v0::Array{mk_float,1}
+    sink_rate::Array{mk_float,1}
+    sink_vth::mk_float
+    constant_sink::Bool
+end
+struct slowing_down_source_data
+    # arrays needed for slowing down sources and sinks
+    sink_func::Array{mk_float,2}
+    source_input::slowing_down_source_data_input
+    function slowing_down_source_data(vpa::finite_element_coordinate,
+            vperp::finite_element_coordinate, species::species_info,
+            source_input::slowing_down_source_data_input)
+        source_rate = source_input.source_rate
+        source_vth = source_input.source_vth
+        source_v0 = source_input.source_v0
+        sink_rate = source_input.sink_rate
+        sink_vth = source_input.sink_vth
+        sink_func = allocate_float(vpa.n,vperp.n)
+        if source_input.constant_sink
+            @. sink_func = 1.0
+        else
+            for ivperp in 1:vperp.n
+                for ivpa in 1:vpa.n
+                    v2 = vpa.grid[ivpa]^2 + vperp.grid[ivperp]^2
+                    norm = 1.0/((sqrt(pi)*sink_vth)^3)
+                    sink_func[ivpa,ivperp] = norm*exp(-v2/(sink_vth^2))
+                end
+            end
+        end
+        @boundscheck species.n == size(source_rate,1) || throw(BoundsError(source_rate))
+        @boundscheck species.n == size(source_vth,1) || throw(BoundsError(source_vth))
+        @boundscheck species.n == size(source_v0,1) || throw(BoundsError(source_v0))
+        @boundscheck species.n == size(sink_rate,1) || throw(BoundsError(sink_rate))
+        return new(sink_func, source_input)
+    end
+end
+function slowing_down_source!(source::AbstractArray{mk_float,3},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct, source_data::slowing_down_source_data)
+    # extract variables for source
+    source_rate = source_data.source_input.source_rate
+    source_vth = source_data.source_input.source_vth
+    source_v0 = source_data.source_input.source_v0
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    dummy_vpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
+    # source of alphas
+    for is in 1:species.n
+        for ivperp in 1:vperp.n
+            for ivpa in 1:vpa.n
+                v2 = vperp.grid[ivperp]^2 + vpa.grid[ivpa]^2
+                fac = 0.25/((source_vth[is]*source_v0[is])^2)
+                dummy_vpavperp[ivpa,ivperp] = exp(-fac*(v2 - source_v0[is]^2)^2 )
+            end
+        end
+        normfac = get_density(dummy_vpavperp, vpa, vperp)
+        @. source[:,:,is] += source_rate[is]*dummy_vpavperp/normfac
+    end
+    return nothing
+end
+function slowing_down_sink!(source::AbstractArray{mk_float,3},
+    pdf::AbstractArray{mk_float,3},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+    source_data::slowing_down_source_data)
+    # extract variables for sink of alphas
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    YY_arrays = fkpl_arrays.YY_arrays
+    lu_obj_MM = fkpl_arrays.fprp_solver_data.matrix_operators.lu_obj_MM
+    S_dummy = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
+    rhsvpavperp = fkpl_arrays.fprp_solver_data.matrix_operators.rhsvpavperp
+    rhsc = vec(rhsvpavperp)
+    sc = vec(S_dummy)
+    sink_rate = source_data.source_input.sink_rate
+    sink_func = source_data.sink_func
+    # sink of alphas
+    for is in 1:species.n
+        @. rhsc = 0.0
+        @views pdfs = pdf[:,:,is]
+        for ielement_vperp in 1:vperp.nelement
+            @views YYNperp = YY_arrays.YYNperp[:,:,:,:,ielement_vperp]
+            @views vperp_igrid_full = vperp.igrid_full[:,ielement_vperp]
+            imin_vperp, imax_vperp = vperp_igrid_full[1], vperp_igrid_full[vperp.ngrid]
+            for ielement_vpa in 1:vpa.nelement
+                @views YYNpar = YY_arrays.YYNpar[:,:,:,:,ielement_vpa]
+                @views vpa_igrid_full = vpa.igrid_full[:,ielement_vpa]
+                imin_vpa, imax_vpa = vpa_igrid_full[1], vpa_igrid_full[vpa.ngrid]
+                @views sink_func_local = sink_func[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                @views pdfs_local = pdfs[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                for ivperp_local in 1:vperp.ngrid
+                    ivperp_global = vperp_igrid_full[ivperp_local]
+                    for ivpa_local in 1:vpa.ngrid
+                        ivpa_global = vpa_igrid_full[ivpa_local]
+                        # global compound index
+                        ic_global = ic_func(ivpa_global,ivperp_global,vpa.n)
+                        #ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                        # carry out the matrix sum on each 2D element
+                        result = 0.0
+                        for jvperpp_local in 1:vperp.ngrid
+                            for kvperpp_local in 1:vperp.ngrid
+                                @views YYNperp_kji = YYNperp[:,kvperpp_local,jvperpp_local,ivperp_local]
+                                for jvpap_local in 1:vpa.ngrid
+                                    pdfjj = pdfs_local[jvpap_local,jvperpp_local]
+                                    for kvpap_local in 1:vpa.ngrid
+                                        @views YYNpar_kji = YYNpar[:,kvpap_local,jvpap_local,ivpa_local]
+                                        result += pdfjj*YYNperp_kji[1]*YYNpar_kji[1]*sink_func_local[kvpap_local,kvperpp_local]
+                                    end
+                                end
+                            end
+                        end
+                        rhsc[ic_global] += result
+                    end
+                end
+            end
+        end
+        # invert mass matrix to get collocation point values
+        ldiv!(sc, lu_obj_MM, rhsc)
+        @views @. source[:,:,is] -= sink_rate[is]*S_dummy
+    end
+    return nothing
+end
+function slowing_down_source!(source::AbstractArray{mk_float,3},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct, source_data::Nothing)
+    # do nothing
+    return nothing
+end
+function slowing_down_sink!(source::AbstractArray{mk_float,3},
+    pdf::AbstractArray{mk_float,3},
+    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+    source_data::Nothing)
+    # do nothing
+    return nothing
+end
+function add_slowing_down_source!(Fnew::AbstractArray{mk_float,3},
+    Fdummy::AbstractArray{mk_float,3}, fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+    source_data::slowing_down_source_data, delta_t::mk_float)
+    @. Fdummy = 0.0 # set dummy to zero before adding source
+    slowing_down_source!(Fdummy, fkpl_arrays, source_data)
+    @. Fnew += delta_t*Fdummy
+    return nothing
+end
+function add_slowing_down_source!(Fnew::AbstractArray{mk_float,3},
+    Fdummy::AbstractArray{mk_float,3}, fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+    source_data::Nothing, delta_t::mk_float)
+    # do nothing
+    return nothing
+end
+
+struct fokker_planck_backward_euler_data
     # arrays for storing collision operator computed
     # when iterating in the backward Euler step
     CCs::Array{mk_float,3}
+    # array for storing the sources to preserve collision diagnostics
+    source::Array{mk_float,3}
     # matrices for storing preconditioner
     # based on I - dt * C[delta F, F]
     CC2D_sparse::AbstractSparseArray{mk_float,mk_int,2}
@@ -975,6 +1132,7 @@ struct fokker_plack_backward_euler_data
     Fsv::Array{mk_float,3}
     Fsw::Array{mk_float,3}
     fp_operator::fokkerplanck_weakform_arrays_struct
+    source_data::Union{slowing_down_source_data,Nothing}
     # constructor with interface and JFNK optional arguments
     """
     Wrapper function to provide the interface for initialising the
@@ -990,7 +1148,7 @@ struct fokker_plack_backward_euler_data
     where the former type is defined in `FokkerPlanck.coordinates`
     and the latterr is defined in `FiniteElementMatrices`.
     """
-    function fokker_plack_backward_euler_data(
+    function fokker_planck_backward_euler_data(
         mass::Vector{mk_float},
         zeds::Vector{mk_float},
         inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
@@ -1003,7 +1161,8 @@ struct fokker_plack_backward_euler_data
         nl_solver_rtol=0.0::mk_float,
         nl_solver_nonlinear_max_iterations=20::mk_int,
         print_to_screen=true::Bool,
-        fixed_background_plasma_in=nothing::Union{fixed_background_plasma_input,Nothing})
+        fixed_background_plasma_in=nothing::Union{fixed_background_plasma_input,Nothing},
+        source_data_in=nothing::Union{slowing_down_source_data_input,Nothing})
         # create the coordinate structs from the input data
         vperp = finite_element_coordinate("vperp", inputs_vperp,
                                     bc=bc_vperp)
@@ -1011,13 +1170,13 @@ struct fokker_plack_backward_euler_data
                                     bc=bc_vpa)
         species = species_info(mass,zeds)
         # use constructor function for fokkerplanck_weakform_arrays_struct
-        return fokker_plack_backward_euler_data(vpa,vperp,species,
+        return fokker_planck_backward_euler_data(vpa,vperp,species,
                     boundary_data_option,multi_species_operator_option,
                     nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
-                    print_to_screen,fixed_background_plasma_in)
+                    print_to_screen,fixed_background_plasma_in,source_data_in)
     end
     # constructor without optional arguments
-    function fokker_plack_backward_euler_data(vpa::finite_element_coordinate,
+    function fokker_planck_backward_euler_data(vpa::finite_element_coordinate,
                                     vperp::finite_element_coordinate,
                                     species::species_info,
                                     boundary_data_option::boundary_data_type,
@@ -1026,10 +1185,12 @@ struct fokker_plack_backward_euler_data
                                     nl_solver_rtol::mk_float,
                                     nl_solver_nonlinear_max_iterations::mk_int,
                                     print_to_screen::Bool,
-                                    fixed_background_plasma_in::Union{fixed_background_plasma_input,Nothing})
+                                    fixed_background_plasma_in::Union{fixed_background_plasma_input,Nothing},
+                                    source_data_in::Union{slowing_down_source_data_input,Nothing})
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         # collision operator arrays for intermediate results
         CCs = allocate_float(nvpa,nvperp,nspecies)
+        source = allocate_float(nvpa,nvperp,nspecies)
         # preconditioner matrix
         CC2D_sparse, CC2D_sparse_constructor, lu_obj_CC2D = allocate_preconditioner_matrix(vpa,vperp)
         lu_objs_CC2D = Array{SuiteSparse.UMFPACK.UmfpackLU{mk_float,mk_int},1}(undef,nspecies)
@@ -1053,12 +1214,17 @@ struct fokker_plack_backward_euler_data
                                                 multi_species_operator_option=multi_species_operator_option,
                                                 print_to_screen=print_to_screen,
                                                 fixed_background_plasma_in=fixed_background_plasma_in)
-        return new(CCs,
+        if typeof(source_data_in) == slowing_down_source_data_input
+            source_data = slowing_down_source_data(vpa,vperp,species,source_data_in)
+        else
+            source_data = nothing
+        end
+        return new(CCs,source,
             CC2D_sparse,CC2D_sparse_constructor,lu_obj_CC2D,
             lu_objs_CC2D,
             nl_solver_data_s,
             Fs_new,Fs_residual,Fs_delta_x,Fs_rhs_delta,Fsv,Fsw,
-            fp_operator)
+            fp_operator,source_data)
     end
 end
 
@@ -2691,7 +2857,7 @@ end
 
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
     delta_t::mk_float,ms::mk_float,msp::mk_float,nussp::mk_float,
-    fkpl_arrays::fokker_plack_backward_euler_data;
+    fkpl_arrays::fokker_planck_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
@@ -2721,7 +2887,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
 end
 function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     delta_t::mk_float,nuref::mk_float,
-    fkpl_arrays::fokker_plack_backward_euler_data;
+    fkpl_arrays::fokker_planck_backward_euler_data;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
     calculate_dGdvperp=false)
@@ -2737,6 +2903,8 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     rosenbluth_potentials = fp_operator.rosenbluth_potentials
     # information about fixed background plasma
     fixed_background_plasma = fp_operator.fixed_background_plasma
+    # information about sources and sinks
+    source_data = fkpl_arrays.source_data
     # compute potentials due to evolved species
     if use_Maxwellian_Rosenbluth_coefficients
         for is in 1:species.n
@@ -2761,6 +2929,8 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
                     fixed_background_plasma)
             assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor,
                 rosenbluth_potentials,delta_t,nuref,fp_operator)
+            assemble_slowing_down_sink_preconditioner_rhs!(CC2D_sparse_constructor,
+                                delta_t,fp_operator,source_data,is)
             # should improve on this step to avoid recreating the sparse array if possible.
             fkpl_arrays.CC2D_sparse .= create_sparse_matrix(CC2D_sparse_constructor)
             lu!(fkpl_arrays.lu_objs_CC2D[is], fkpl_arrays.CC2D_sparse)
@@ -2916,9 +3086,75 @@ function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse_constructor
     end
     return nothing
 end
+function assemble_slowing_down_sink_preconditioner_rhs!(CC2D_sparse_constructor::sparse_matrix_constructor,
+    delta_t::mk_float,fkpl_arrays::fokkerplanck_weakform_arrays_struct, source_data::Nothing,
+    is::mk_int)
+    # do nothing
+    return nothing
+end
+function assemble_slowing_down_sink_preconditioner_rhs!(CC2D_sparse_constructor::sparse_matrix_constructor,
+    delta_t::mk_float,fkpl_arrays::fokkerplanck_weakform_arrays_struct, source_data::slowing_down_source_data,
+    is::mk_int)
+    # extract structs from fkpl_arrays
+    vpa = fkpl_arrays.vpa
+    vperp = fkpl_arrays.vperp
+    species = fkpl_arrays.species
+    YY_arrays = fkpl_arrays.YY_arrays
+    sink_func = source_data.sink_func
+    sink_rate = source_data.source_input.sink_rate[is]
+    delt_rate = delta_t*sink_rate
+    # do not set constructor to zero, as this the second set of terms added
+    @inbounds begin
+        # loop over elements
+        for ielement_vperp in 1:vperp.nelement
+            @views YYNperp = YY_arrays.YYNperp[:,:,:,:,ielement_vperp]
+            @views vperp_igrid_full = vperp.igrid_full[:,ielement_vperp]
+            imin_vperp, imax_vperp = vperp_igrid_full[1], vperp_igrid_full[vperp.ngrid]
+            for ielement_vpa in 1:vpa.nelement
+                @views YYNpar = YY_arrays.YYNpar[:,:,:,:,ielement_vpa]
+                @views vpa_igrid_full = vpa.igrid_full[:,ielement_vpa]
+                imin_vpa, imax_vpa = vpa_igrid_full[1], vpa_igrid_full[vpa.ngrid]
+                @views sink_func_local = sink_func[imin_vpa:imax_vpa,imin_vperp:imax_vperp]
+                # loop over field positions in each element
+                for ivperp_local in 1:vperp.ngrid
+                    for ivpa_local in 1:vpa.ngrid
+                        for jvperpp_local in 1:vperp.ngrid
+                            for jvpap_local in 1:vpa.ngrid
+                                # carry out the matrix sum on each 2D element
+                                # mass matrix contribution
+                                # don't need these indices because we just overwrite
+                                # the constructor values, not the indices
+                                # ic_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,ivpa_local,ivperp_local)
+                                # icp_global = get_global_compound_index(vpa,vperp,ielement_vpa,ielement_vperp,jvpap_local,jvperpp_local)
+                                icsc = icsc_func(ivpa_local,jvpap_local,ielement_vpa,
+                                        vpa.ngrid,vpa.nelement,
+                                        ivperp_local,jvperpp_local,
+                                        ielement_vperp,
+                                        vperp.ngrid,vperp.nelement)
+                                # sink contribution
+                                result = 0.0
+                                for kvperpp_local in 1:vperp.ngrid
+                                    for kvpap_local in 1:vpa.ngrid
+                                        # first three lines represent parallel flux terms
+                                        # second three lines represent perpendicular flux terms
+                                        result += (delt_rate*YYNperp[1,kvperpp_local,jvperpp_local,ivperp_local]*
+                                                    YYNpar[1,kvpap_local,jvpap_local,ivpa_local]*
+                                                    sink_func_local[kvpap_local,kvperpp_local])
+                                    end
+                                end
+                                assemble_constructor_value!(CC2D_sparse_constructor,icsc,result)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nothing
+end
 
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,2},
-                                    fkpl_arrays::fokker_plack_backward_euler_data)
+                                    fkpl_arrays::fokker_planck_backward_euler_data)
     # (the LU decomposition object for)
     # the backward Euler time advance matrix
     # for linearised test particle collisions K * dF = C[dF, F^n+1].
@@ -2958,7 +3194,7 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_floa
     return nothing
 end
 function advance_linearised_test_particle_collisions!(pdf::AbstractArray{mk_float,3},
-                                    fkpl_arrays::fokker_plack_backward_euler_data)
+                                    fkpl_arrays::fokker_planck_backward_euler_data)
     # (the vector of LU decomposition objects for)
     # the backward Euler time advance matrix
     # for multi-species linearised test particle collisions K * dF = C[dF, F^n+1].
@@ -3854,9 +4090,35 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
     return nothing
 end
 # corrections to preserve the density, total momentum and total energy in the pdf(vpa,vperp,species)
+# only possible to apply to closed systems without fixed species or sources and sinks
 function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
                             pdf_old::AbstractArray{mk_float,3},
-                            fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                            source_data::Nothing)
+    return conserving_corrections!(pdf_new, pdf_old, fkpl_arrays,
+        fkpl_arrays.fixed_background_plasma, source_data)
+end
+function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
+                            pdf_old::AbstractArray{mk_float,3},
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                            source_data::slowing_down_source_data)
+    # do nothing
+    return nothing
+end
+function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
+                            pdf_old::AbstractArray{mk_float,3},
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                            fixed_background_plasma::fixed_background_plasma_info,
+                            source_data::Union{Nothing,slowing_down_source_data})
+    # do nothing
+    return nothing
+end
+# only if there are no sources and no fixed background can we apply these corrections to F
+function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
+                            pdf_old::AbstractArray{mk_float,3},
+                            fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+                            fixed_background_plasma::Nothing,
+                            source_data::Nothing)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
