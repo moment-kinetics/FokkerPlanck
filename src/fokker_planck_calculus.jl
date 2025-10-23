@@ -752,7 +752,7 @@ struct fokkerplanck_rosenbluth_potential_solver_data
 end
 
 """
-Immutable information about each species
+Information about each species
 """
 struct species_info
     # number of species
@@ -761,21 +761,47 @@ struct species_info
     mass::Vector{mk_float}
     # charge number of each species
     zeds::Vector{mk_float}
+    # reference speed for each species, given with respect to the species-independent c_ref
+    c0ref::Vector{mk_float}
+    # reference parallel velocity for each species, given with respect to the species-independent c_ref
+    u0ref::Vector{mk_float}
+    # reference density for each species, , given with respect to the species-independent n_ref
+    n0ref::Vector{mk_float}
     """
     Internal constructor for `species_info`.
     """
     function species_info(mass::Vector{mk_float},zeds::Vector{mk_float})
+        # constructor where no reference information is supplied
+        nspecies = length(zeds)
+        c0ref = ones(nspecies)
+        u0ref = zeros(nspecies)
+        n0ref = ones(nspecies)
+        return species_info(mass,zeds,c0ref,u0ref,n0ref)
+    end
+    function species_info(mass::Vector{mk_float},zeds::Vector{mk_float},
+        c0ref::Vector{mk_float}, u0ref::Vector{mk_float}, n0ref::Vector{mk_float})
         # number of species
         nspecies = length(zeds)
         # check inputs are consistent
         @boundscheck nspecies == length(mass) || throw(BoundsError(mass))
-        # check mass positive and > 0
+        @boundscheck nspecies == length(c0ref) || throw(BoundsError(c0ref))
+        @boundscheck nspecies == length(u0ref) || throw(BoundsError(u0ref))
+        @boundscheck nspecies == length(n0ref) || throw(BoundsError(n0ref))
         for is in 1:nspecies
+            # check mass positive and > 0
             if mass[is] < 1.0e-12
                 error("ERROR: mass[$is] < 1.0e-12")
             end
+            # check ref density positive and > 0
+            if n0ref[is] < 1.0e-12
+                error("ERROR: n0ref[$is] < 1.0e-12")
+            end
+            # check ref speed positive and > 0
+            if c0ref[is] < 1.0e-12
+                error("ERROR: c0ref[$is] < 1.0e-12")
+            end
         end
-        return new(nspecies,mass,zeds)
+        return new(nspecies,mass,zeds,c0ref,u0ref,n0ref)
     end
 end
 
