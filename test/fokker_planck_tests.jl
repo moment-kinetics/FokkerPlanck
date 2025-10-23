@@ -27,7 +27,8 @@ using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_da
 using FokkerPlanck.fokker_planck_calculus: enforce_vpavperp_BCs!, calculate_rosenbluth_potentials_via_direct_integration!
 using FokkerPlanck.fokker_planck_calculus: interpolate_2D_vspace!, calculate_test_particle_preconditioner!
 using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, fokkerplanck_weakform_arrays_struct,
-                                            fokkerplanck_arrays_direct_integration_struct
+                                            fokkerplanck_arrays_direct_integration_struct, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
+                                            convert_rosenbluth_potentials_to_primed_grid!, rosenbluth_potential_data
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=12.0,Lvperp=6.0,bc_vpa=zero_boundary_condition,bc_vperp=zero_boundary_condition)
@@ -532,6 +533,75 @@ function test_interpolate_2D_vspace(; ngrid=9,
     #println(max_F)
     @test max_F_err < rtol * max_F
 
+    return nothing
+end
+
+function test_interpolate_2D_vspace_new(; ngrid=9,
+                                nelement_vpa=16,
+                                nelement_vperp = 8,
+                                rtol = 1.0e-14)
+    ngrid = 9
+    nelement_vpa = 16
+    nelement_vperp = 8
+    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                Lvpa=8.0,Lvperp=4.0)
+    electron_mass = 1.0/1836.0
+    thermal_temperature = 1.0
+    mass = [electron_mass,1.0]
+    zeds = [-1.0, 1.0]
+    # reference speeds in units of cref = sqrt(Tref/mref)
+    c0ref = [sqrt(2.0*thermal_temperature/mass[is]) for is in 1:2]
+    u0ref = [-0.5, 1.0]
+    # reference density in units of nref
+    n0ref = [0.9, 1.1]
+    species = species_info(mass,zeds,c0ref,u0ref,n0ref)
+    # moments of pdfs in units of cref, nref
+    density = [0.6, 1.5]
+    upar = [-1.0, 2.0]
+    vth = [0.8*c0ref[1], 1.2*c0ref[2]]
+
+    # Rosenbluth potentials on natural grids
+    rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
+    # Rosenbluth potentials on grid of another species, analytical
+    rosenbluth_potentials_s_converted_exact = rosenbluth_potential_data(vpa,vperp)
+    # Rosenbluth potentials converted from natural grids to grid of another species
+    rosenbluth_potentials_s_converted_numerical = rosenbluth_potential_data(vpa,vperp)
+    # array for testing errors
+    vpavperp_err = allocate_float(vpa.n,vperp.n)
+    for is in 1:species.n
+        rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+        # get moments for Rosenbluth potentials on natural grids
+        density_in = density[is]/n0ref[is]
+        upar_in = (upar[is] - u0ref[is])/c0ref[is]
+        vth_in = vth[is]/c0ref[is]
+        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+            rosenbluth_potentials_s[is],density_in,upar_in,vth_in,vpa,vperp)
+    end
+    for is in 1:species.n
+        # test the conversion of species s to s' grids for each primed species
+        for isp in 1:species.n
+            println("is=$is isp=$isp")
+            # first compute exact results for species s on s' grid
+            density_in = density[is]/n0ref[isp]
+            upar_in = (upar[is] - u0ref[isp])/c0ref[isp]
+            vth_in = vth[is]/c0ref[isp]
+            calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+                rosenbluth_potentials_s_converted_exact,density_in,upar_in,vth_in,vpa,vperp)
+            # make normalisation prefactor still units of species s
+            @. rosenbluth_potentials_s_converted_exact.GG *= (n0ref[isp]*c0ref[isp])/(n0ref[is]*c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.HH *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            # get the results on the s' grid
+            @. rosenbluth_potentials_s_converted_numerical.GG = 0.0
+            # other potentials tbd
+            convert_rosenbluth_potentials_to_primed_grid!(rosenbluth_potentials_s_converted_numerical,
+                rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
+                species.c0ref[isp], species.u0ref[isp])
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.GG - rosenbluth_potentials_s_converted_exact.GG)
+            max_G_err = maximum(vpavperp_err)
+            max_G = maximum(rosenbluth_potentials_s_converted_exact.GG)
+            @test max_G_err < rtol * max_G
+        end
+    end
     return nothing
 end
 

@@ -32,6 +32,7 @@ export fixed_background_plasma_input,
     slowing_down_source_data_input,
     slowing_down_source!, slowing_down_sink!,
     add_slowing_down_source!
+export convert_rosenbluth_potentials_to_primed_grid!
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
@@ -3881,6 +3882,72 @@ function interpolate_2D_vspace!(pdf_out::AbstractArray{mk_float,2},
     return nothing
 end
 
+"""
+"""
+function convert_rosenbluth_potentials_to_primed_grid!(
+            rosenbluth_potentials_primed_grid::rosenbluth_potential_data,
+            rosenbluth_potentials::rosenbluth_potential_data,
+            vpa::finite_element_coordinate, vperp::finite_element_coordinate,
+            c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float)
+    # get index limits on primed species vpa, vperp grids for interpolation
+    # maximum value of vperp on s' grid that can be interpolated
+    vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
+    # maximum and minimum values of vpa on s' grid that can be interpolated
+    vpa_max_sp = (c0refs/c0refsp)*vpa.grid[end] + (u0refs - u0refsp)/c0refsp
+    vpa_min_sp = (c0refs/c0refsp)*vpa.grid[1] + (u0refs - u0refsp)/c0refsp
+    ilims = [vperp.n, 1, vpa.n]
+    ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
+    ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
+    ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    # use interpolation and extrapolation from the multipole expansion
+    for ivperp in 1:ivperp_max_sp
+        for ivpa in 1:ivpa_min_sp-1
+            # multipole
+        end
+        for ivpa in ivpa_min_sp:ivpa_max_sp
+            # interpolate
+        end
+        for ivpa in ivpa_max_sp+1:vpa.n
+            # multipole
+        end
+    end
+    for ivperp in ivperp_max_sp+1:vperp.n
+        for ivpa in 1:vpa.n
+            # multipole
+        end
+    end
+    return nothing
+end
+
+"""
+Function to find the nearest index corresponding to a coordinate value
+ v - value of coord to use in root find
+ coord - coordinate struct
+ ilim_default - integer value to return if root find fails
+ p - integer to shift index when v falls between points
+"""
+function igrid_lookup(v::mk_float, coord::finite_element_coordinate, ilim_default::mk_int, p::mk_int)
+    zero = 1.0e-14
+    ilim = ilim_default
+    for i in 1:coord.n-1
+        x1 = v - coord.grid[i]
+        x2 = coord.grid[i+1] - v
+        # check for intermediate crossings
+        if x1*x2 > zero
+            ilim = i+p
+            break
+        # check for grid points
+        elseif abs(x1) < 100*zero
+            ilim = i
+            break
+        end
+    end
+    # check final grid point
+    if abs(coord.grid[coord.n] - v) < 100*zero
+        ilim = coord.n
+    end
+    return ilim
+end
 """
 Function to find the element in which x sits.
 """
