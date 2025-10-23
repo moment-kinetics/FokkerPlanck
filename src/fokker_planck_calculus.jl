@@ -713,6 +713,8 @@ struct rosenbluth_potential_data
     d2Gdvperp2::Array{mk_float,2}
     d2Gdvpa2::Array{mk_float,2}
     d2Gdvperpdvpa::Array{mk_float,2}
+    # the moments required to reconstuct the multipole expansion
+    Inn_vec::Vector{mk_float}
     function rosenbluth_potential_data(vpa::finite_element_coordinate,
                                 vperp::finite_element_coordinate)
         GG = allocate_float(vpa.n,vperp.n)
@@ -723,7 +725,9 @@ struct rosenbluth_potential_data
         d2Gdvperp2 = allocate_float(vpa.n,vperp.n)
         d2Gdvpa2 = allocate_float(vpa.n,vperp.n)
         d2Gdvperpdvpa = allocate_float(vpa.n,vperp.n)
-        return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa)
+        Inn_vec = allocate_float(25)
+        return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
+                    Inn_vec)
     end
 end
 
@@ -2610,6 +2614,7 @@ assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in 
 without allocation.
 """
 function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenbluth_potential_boundary_data,
+    Inn_vec::Vector{mk_float},
     pdf::AbstractArray{mk_float,2},vpa::finite_element_coordinate,vperp::finite_element_coordinate;
     calculate_GG=false,calculate_dGdvperp=false)
     @inbounds begin
@@ -2644,7 +2649,7 @@ function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenblut
 
         I08 = integral(pdf, vpa.grid, 0, vpa.wgts, vperp.grid, 8, vperp.wgts)
         # group into vector to pass around
-        Inn_vec = [I00, I10, I20, I30, I40, I50, I60, I70, I80,
+        Inn_vec .= [I00, I10, I20, I30, I40, I50, I60, I70, I80,
                     I02, I12, I22, I32, I42, I52, I62,
                     I04, I14, I24, I34, I44,
                     I06, I16, I26,
@@ -2674,6 +2679,7 @@ without allocation. Use the exact results for the part of F that can be describe
 a Maxwellian, and the multipole expansion for the remainder.
 """
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
+    Inn_vec::Vector{mk_float},
     pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
     vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
     calculate_GG=false,calculate_dGdvperp=false)
@@ -2692,7 +2698,7 @@ function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::r
         end
     end
     # now pass the delta f to the multipole function
-    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,dummy_vpavperp,
+    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inn_vec,dummy_vpavperp,
       vpa,vperp,
       calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     # now add on the contributions from the Maxwellian
@@ -3455,6 +3461,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
     d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
     d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    Inn_vec = rosenbluth_potentials.Inn_vec
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
     matrix_operators = fkpl_arrays.matrix_operators
     MM2D_sparse = matrix_operators.MM2D_sparse
@@ -3481,10 +3488,10 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(
     boundary_data_option = fkpl_arrays.boundary_data_option
     # calculate the boundary data
     if boundary_data_option == multipole_expansion
-        calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,ffsp_in,vpa,vperp,
+        calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inn_vec,ffsp_in,vpa,vperp,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == delta_f_multipole # use a variant of the multipole method
-        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,ffsp_in,S_dummy,vpa,vperp,mass,
+        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,Inn_vec,ffsp_in,S_dummy,vpa,vperp,mass,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == direct_integration  # use direct integration on the boundary
         calculate_rosenbluth_potential_boundary_data!(rpbd,bwgt,ffsp_in,vpa,vperp,
