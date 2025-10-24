@@ -2168,7 +2168,18 @@ function calculate_rosenbluth_potential_boundary_data!(rpbd::rosenbluth_potentia
     return nothing
 end
 
-function multipole_H(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+# types for labelling Rosenbluth potentials, for type dispatch
+abstract type AbstractRosenbluthPotentialLabel end
+struct HLabel <: AbstractRosenbluthPotentialLabel end
+struct dHdvpaLabel <: AbstractRosenbluthPotentialLabel end
+struct dHdvperpLabel <: AbstractRosenbluthPotentialLabel end
+struct GLabel <: AbstractRosenbluthPotentialLabel end
+struct dGdvperpLabel <: AbstractRosenbluthPotentialLabel end
+struct d2Gdvperp2Label <: AbstractRosenbluthPotentialLabel end
+struct d2Gdvpa2Label <: AbstractRosenbluthPotentialLabel end
+struct d2GdvperpdvpaLabel <: AbstractRosenbluthPotentialLabel end
+
+function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2205,7 +2216,7 @@ function multipole_H(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    return H_series
 end
 
-function multipole_dHdvpa(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2242,7 +2253,7 @@ function multipole_dHdvpa(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float
    return dHdvpa_series
 end
 
-function multipole_dHdvperp(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2279,7 +2290,7 @@ function multipole_dHdvperp(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_flo
    return dHdvperp_series
 end
 
-function multipole_G(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2316,7 +2327,7 @@ function multipole_G(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    return G_series
 end
 
-function multipole_dGdvperp(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2353,7 +2364,7 @@ function multipole_dGdvperp(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_flo
    return dGdvperp_series
 end
 
-function multipole_d2Gdvperp2(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2390,7 +2401,7 @@ function multipole_d2Gdvperp2(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_f
    return d2Gdvperp2_series
 end
 
-function multipole_d2Gdvperpdvpa(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2427,7 +2438,7 @@ function multipole_d2Gdvperpdvpa(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{m
    return d2Gdvperpdvpa_series
 end
 
-function multipole_d2Gdvpa2(vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2Gdvpa2Label,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
@@ -2466,144 +2477,19 @@ end
 
 """
 """
-function calculate_boundary_data_multipole_H!(func_data::vpa_vperp_boundary_data,
+function calculate_boundary_data_multipole!(func_data::vpa_vperp_boundary_data,
+                                            label::AbstractRosenbluthPotentialLabel,
                                             vpa::finite_element_coordinate,
                                             vperp::finite_element_coordinate,
                                             Inn_vec::Vector{mk_float})
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_H(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_H(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
+                func_data.lower_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[1],vperp.grid[ivperp],Inn_vec)
+                func_data.upper_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
     end
     @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_H(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_dHdvpa!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_dHdvpa(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_dHdvpa(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_dHdvpa(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_dHdvperp!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_dHdvperp(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_dHdvperp(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_dHdvperp(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_G!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_G(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_G(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_G(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_dGdvperp!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_dGdvperp(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_dGdvperp(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_dGdvperp(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_d2Gdvperp2!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_d2Gdvperp2(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_d2Gdvperp2(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_d2Gdvperp2(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_d2Gdvperpdvpa!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_d2Gdvperpdvpa(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_d2Gdvperpdvpa(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_d2Gdvperpdvpa(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
-    end
-    return nothing
-end
-
-"""
-"""
-function calculate_boundary_data_multipole_d2Gdvpa2!(func_data::vpa_vperp_boundary_data,
-                                            vpa::finite_element_coordinate,
-                                            vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_d2Gdvpa2(vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_d2Gdvpa2(vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
-    end
-    @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_d2Gdvpa2(vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
+                func_data.upper_boundary_vperp[ivpa] = multipole_series(label,vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
     end
     return nothing
 end
@@ -2655,19 +2541,18 @@ function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenblut
                     I06, I16, I26,
                     I08]
         # evaluate the multipole formulae
-        calculate_boundary_data_multipole_H!(rpbd.H_data,vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole_dHdvpa!(rpbd.dHdvpa_data,vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole_dHdvperp!(rpbd.dHdvperp_data,vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.H_data,HLabel(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.dHdvpa_data,dHdvpaLabel(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.dHdvperp_data,dHdvperpLabel(),vpa,vperp,Inn_vec)
         if calculate_GG
-            calculate_boundary_data_multipole_G!(rpbd.G_data,vpa,vperp,Inn_vec)
+            calculate_boundary_data_multipole!(rpbd.G_data,GLabel(),vpa,vperp,Inn_vec)
         end
         if calculate_dGdvperp
-            calculate_boundary_data_multipole_dGdvperp!(rpbd.dGdvperp_data,vpa,vperp,Inn_vec)
+            calculate_boundary_data_multipole!(rpbd.dGdvperp_data,dGdvperpLabel(),vpa,vperp,Inn_vec)
         end
-        calculate_boundary_data_multipole_d2Gdvperp2!(rpbd.d2Gdvperp2_data,vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole_d2Gdvperpdvpa!(rpbd.d2Gdvperpdvpa_data,vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole_d2Gdvpa2!(rpbd.d2Gdvpa2_data,vpa,vperp,Inn_vec)
-
+        calculate_boundary_data_multipole!(rpbd.d2Gdvperp2_data,d2Gdvperp2Label(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.d2Gdvperpdvpa_data,d2GdvperpdvpaLabel(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.d2Gdvpa2_data,d2Gdvpa2Label(),vpa,vperp,Inn_vec)
         return nothing
     end
 end
