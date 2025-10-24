@@ -116,7 +116,7 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
                     pdf_exact[ivpa,ivperp,is] = F_Maxwellian(moments.density[is],
                                                             moments.upar[is],
                                                             moments.vth[is],
-                                                            vpa,vperp,ivpa,ivperp)
+                                                            vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -219,8 +219,8 @@ function set_initial_pdf!(Fold::AbstractArray{mk_float,2},
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                Fold[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp) +
-                                    + zbeam * F_Beam(0.0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                Fold[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp]) +
+                                    + zbeam * F_Beam(0.0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end

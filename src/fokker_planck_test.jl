@@ -38,11 +38,9 @@ the normalised Maxwellian.
 See Plasma Confinement, R. D. Hazeltine & J. D. Meiss, 2003, Dover Publications, pg 184, Chpt 5.2, Eqn (5.49).
 """
 function G_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                    vpa::finite_element_coordinate,
-                    vperp::finite_element_coordinate,
-                    ivpa::mk_int,ivperp::mk_int)
+                    vpa::mk_float,vperp::mk_float)
     # speed variable
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
+    eta = eta_func(upar,vth,vpa,vperp)
     zero = 1.0e-10
     if eta < zero
         G = 2.0/sqrt(pi)
@@ -66,11 +64,9 @@ the normalised Maxwellian.
 See Plasma Confinement, R. D. Hazeltine & J. D. Meiss, 2003, Dover Publications, pg 184, Chpt 5.2, Eqn (5.49).
 """
 function H_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                    vpa::finite_element_coordinate,
-                    vperp::finite_element_coordinate,
-                    ivpa::mk_int,ivperp::mk_int)
+                    vpa::mk_float,vperp::mk_float)
     # speed variable
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
+    eta = eta_func(upar,vth,vpa,vperp)
     zero = 1.0e-10
     if eta < zero
         # erf(eta)/eta ~ 2/sqrt(π) + O(eta^2) for eta << 1
@@ -116,10 +112,8 @@ with \$v_{\\rm th} = \\sqrt{2 p / n m}\$ the thermal speed, and \$p\$ the pressu
  \$n\$ the density and \$m\$ the mass.
 """
 function eta_func(upar::mk_float,vth::mk_float,
-             vpa::finite_element_coordinate,
-             vperp::finite_element_coordinate,
-             ivpa::mk_int,ivperp::mk_int)
-    speed = sqrt( (vpa.grid[ivpa] - upar)^2 + vperp.grid[ivperp]^2)/vth
+             vpa::mk_float,vperp::mk_float)
+    speed = sqrt( (vpa - upar)^2 + vperp^2)/vth
     return speed
 end
 
@@ -131,11 +125,9 @@ Function computing
  for Maxwellian input. See `G_Maxwellian()`.
 """
 function d2Gdvpa2_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = dGdeta(eta) + ddGddeta(eta)*((vpa.grid[ivpa] - upar)^2)/(vth^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = dGdeta(eta) + ddGddeta(eta)*((vpa - upar)^2)/(vth^2)
     d2Gdvpa2_fac = fac*dens/(eta*vth)
     return d2Gdvpa2_fac
 end
@@ -148,11 +140,9 @@ Function computing
 for Maxwellian input. See `G_Maxwellian()`.
 """
 function d2Gdvperpdvpa_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = ddGddeta(eta)*vperp.grid[ivperp]*(vpa.grid[ivpa] - upar)/(vth^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = ddGddeta(eta)*vperp*(vpa - upar)/(vth^2)
     d2Gdvperpdvpa_fac = fac*dens/(eta*vth)
     return d2Gdvperpdvpa_fac
 end
@@ -165,11 +155,9 @@ Function computing
 for Maxwellian input. See `G_Maxwellian()`.
 """
 function d2Gdvperp2_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = dGdeta(eta) + ddGddeta(eta)*(vperp.grid[ivperp]^2)/(vth^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = dGdeta(eta) + ddGddeta(eta)*(vperp^2)/(vth^2)
     d2Gdvperp2_fac = fac*dens/(eta*vth)
     return d2Gdvperp2_fac
 end
@@ -182,11 +170,9 @@ Function computing
 for Maxwellian input. See `G_Maxwellian()`.
 """
 function dGdvperp_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = dGdeta(eta)*vperp.grid[ivperp]*dens/(vth*eta)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = dGdeta(eta)*vperp*dens/(vth*eta)
     return fac 
 end
 
@@ -198,11 +184,9 @@ Function computing
 for Maxwellian input. See `H_Maxwellian()`.
 """
 function dHdvperp_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = dHdeta(eta)*vperp.grid[ivperp]*dens/(eta*vth^3)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = dHdeta(eta)*vperp*dens/(eta*vth^3)
     return fac 
 end
 
@@ -214,11 +198,9 @@ Function computing
 for Maxwellian input. See `H_Maxwellian()`.
 """
 function dHdvpa_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = dHdeta(eta)*(vpa.grid[ivpa]-upar)*dens/(eta*vth^3)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = dHdeta(eta)*(vpa-upar)*dens/(eta*vth^3)
     return fac 
 end
 
@@ -226,10 +208,8 @@ end
 Function computing \$ F_{\\rm Maxwellian} \$.
 """
 function F_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                        vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
+                        vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
     fac = (dens/(vth^3)/π^1.5)*exp(-eta^2)
     return fac
 end
@@ -238,10 +218,8 @@ end
 Function computing \$ F_{\\rm Beam} \$.
 """
 function F_Beam(vpa0::mk_float,vperp0::mk_float,vth0::mk_float,
-                        vpa::finite_element_coordinate,
-                        vperp::finite_element_coordinate,
-                        ivpa::mk_int,ivperp::mk_int)
-    w2 = (vpa.grid[ivpa]-vpa0)^2 + (vperp.grid[ivperp]-vperp0)^2
+                        vpa::mk_float,vperp::mk_float)
+    w2 = (vpa-vpa0)^2 + (vperp-vperp0)^2
     fac = exp(-(w2)/(vth0^2))
     return fac
 end
@@ -254,11 +232,9 @@ Function computing
 for \$ F = F_{\\rm Maxwellian}\$.
 """
 function dFdvpa_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = -2.0*(dens/(vth^4)/π^1.5)*((vpa.grid[ivpa] - upar)/vth)*exp(-eta^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = -2.0*(dens/(vth^4)/π^1.5)*((vpa - upar)/vth)*exp(-eta^2)
     return fac
 end
 
@@ -270,11 +246,9 @@ Function computing
 for \$ F = F_{\\rm Maxwellian}\$.
 """
 function dFdvperp_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = -2.0*(dens/(vth^4)/π^1.5)*(vperp.grid[ivperp]/vth)*exp(-eta^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = -2.0*(dens/(vth^4)/π^1.5)*(vperp/vth)*exp(-eta^2)
     return fac
 end
 
@@ -286,11 +260,9 @@ Function computing
 for \$ F = F_{\\rm Maxwellian}\$.
 """
 function d2Fdvperpdvpa_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = 4.0*(dens/(vth^5)/π^1.5)*(vperp.grid[ivperp]/vth)*((vpa.grid[ivpa] - upar)/vth)*exp(-eta^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = 4.0*(dens/(vth^5)/π^1.5)*(vperp/vth)*((vpa - upar)/vth)*exp(-eta^2)
     return fac
 end
 
@@ -302,11 +274,9 @@ Function computing
 for \$ F = F_{\\rm Maxwellian}\$.
 """
 function d2Fdvpa2_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = 4.0*(dens/(vth^5)/π^1.5)*( ((vpa.grid[ivpa] - upar)/vth)^2 - 0.5 )*exp(-eta^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = 4.0*(dens/(vth^5)/π^1.5)*( ((vpa - upar)/vth)^2 - 0.5 )*exp(-eta^2)
     return fac
 end
 
@@ -318,11 +288,9 @@ Function computing
 for \$ F = F_{\\rm Maxwellian}\$.
 """
 function d2Fdvperp2_Maxwellian(dens::mk_float,upar::mk_float,vth::mk_float,
-                            vpa::finite_element_coordinate,
-                            vperp::finite_element_coordinate,
-                            ivpa::mk_int,ivperp::mk_int)
-    eta = eta_func(upar,vth,vpa,vperp,ivpa,ivperp)
-    fac = 4.0*(dens/(vth^5)/π^1.5)*((vperp.grid[ivperp]/vth)^2 - 0.5)*exp(-eta^2)
+                            vpa::mk_float,vperp::mk_float)
+    eta = eta_func(upar,vth,vpa,vperp)
+    fac = 4.0*(dens/(vth^5)/π^1.5)*((vperp/vth)^2 - 0.5)*exp(-eta^2)
     return fac
 end
 
@@ -332,29 +300,28 @@ The input Maxwellians are specified through their moments.
 """
 function Cssp_Maxwellian_inputs(denss::mk_float,upars::mk_float,vths::mk_float,ms::mk_float,Zs::mk_float,
                                 denssp::mk_float,uparsp::mk_float,vthsp::mk_float,msp::mk_float,Zsp::mk_float,
-                                nussp::mk_float,vpa::finite_element_coordinate,
-                                vperp::finite_element_coordinate,ivpa::mk_int,ivperp::mk_int)
+                                nussp::mk_float,vpa::mk_float,vperp::mk_float)
     
-    d2Fsdvpa2 = d2Fdvpa2_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-    d2Fsdvperp2 = d2Fdvperp2_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-    d2Fsdvperpdvpa = d2Fdvperpdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-    dFsdvperp = dFdvperp_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-    dFsdvpa = dFdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-    Fs = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
+    d2Fsdvpa2 = d2Fdvpa2_Maxwellian(denss,upars,vths,vpa,vperp)
+    d2Fsdvperp2 = d2Fdvperp2_Maxwellian(denss,upars,vths,vpa,vperp)
+    d2Fsdvperpdvpa = d2Fdvperpdvpa_Maxwellian(denss,upars,vths,vpa,vperp)
+    dFsdvperp = dFdvperp_Maxwellian(denss,upars,vths,vpa,vperp)
+    dFsdvpa = dFdvpa_Maxwellian(denss,upars,vths,vpa,vperp)
+    Fs = F_Maxwellian(denss,upars,vths,vpa,vperp)
     
-    d2Gspdvpa2 = d2Gdvpa2_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    d2Gspdvperp2 = d2Gdvperp2_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    d2Gspdvperpdvpa = d2Gdvperpdvpa_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    dGspdvperp = dGdvperp_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    dHspdvperp = dHdvperp_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    dHspdvpa = dHdvpa_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    Fsp = F_Maxwellian(denssp,uparsp,vthsp,vpa,vperp,ivpa,ivperp)
+    d2Gspdvpa2 = d2Gdvpa2_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    d2Gspdvperp2 = d2Gdvperp2_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    d2Gspdvperpdvpa = d2Gdvperpdvpa_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    dGspdvperp = dGdvperp_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    dHspdvperp = dHdvperp_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    dHspdvpa = dHdvpa_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
+    Fsp = F_Maxwellian(denssp,uparsp,vthsp,vpa,vperp)
     
     ( Cssp_Maxwellian = 
         d2Fsdvpa2*d2Gspdvpa2 + 
         d2Fsdvperp2*d2Gspdvperp2 + 
         2.0*d2Fsdvperpdvpa*d2Gspdvperpdvpa + 
-        (1.0/(vperp.grid[ivperp]^2))*dFsdvperp*dGspdvperp +
+        (1.0/(vperp^2))*dFsdvperp*dGspdvperp +
         2.0*(1.0 - (ms/msp))*(dFsdvpa*dHspdvpa + dFsdvperp*dHspdvperp) +
         (8.0*pi)*(ms/msp)*Fs*Fsp)
     # gamma_ss' = 2 pi e^4 ln \Lambda_ss' / (4 pi \epsilon_0)^2
@@ -369,13 +336,12 @@ The input Maxwellians are specified through their moments.
 """
 function Cflux_vpa_Maxwellian_inputs(ms::mk_float,denss::mk_float,upars::mk_float,vths::mk_float,
                                      msp::mk_float,denssp::mk_float,uparsp::mk_float,vthsp::mk_float,
-                                     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-                                     ivpa::mk_int,ivperp::mk_int)
-    etap = eta_func(uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    eta = eta_func(upars,vths,vpa,vperp,ivpa,ivperp)
+                                     vpa::mk_float,vperp::mk_float)
+    etap = eta_func(uparsp,vthsp,vpa,vperp)
+    eta = eta_func(upars,vths,vpa,vperp)
     prefac = -2.0*denss*denssp*exp( -eta^2)/(vthsp*vths^5)
-    (fac = (vpa.grid[ivpa]-uparsp)*(d2Gdeta2(etap) + (ms/msp)*((vths/vthsp)^2)*dHdeta(etap)/etap)
-             + (uparsp - upars)*( dGdeta(etap) + ((vpa.grid[ivpa]-uparsp)^2/vthsp^2)*ddGddeta(etap) )/etap )
+    (fac = (vpa-uparsp)*(d2Gdeta2(etap) + (ms/msp)*((vths/vthsp)^2)*dHdeta(etap)/etap)
+             + (uparsp - upars)*( dGdeta(etap) + ((vpa-uparsp)^2/vthsp^2)*ddGddeta(etap) )/etap )
     Cflux = prefac*fac
     #fac *= (ms/msp)*(vths/vthsp)*dHdeta(etap)/etap
     #fac *= d2Gdeta2(etap) 
@@ -388,13 +354,12 @@ The input Maxwellians are specified through their moments.
 """
 function Cflux_vperp_Maxwellian_inputs(ms::mk_float,denss::mk_float,upars::mk_float,vths::mk_float,
                                      msp::mk_float,denssp::mk_float,uparsp::mk_float,vthsp::mk_float,
-                                     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-                                     ivpa::mk_int,ivperp::mk_int)
-    etap = eta_func(uparsp,vthsp,vpa,vperp,ivpa,ivperp)
-    eta = eta_func(upars,vths,vpa,vperp,ivpa,ivperp)
-    prefac = -2.0*(vperp.grid[ivperp])*denss*denssp*exp( -eta^2)/(vthsp*vths^5)
+                                     vpa::mk_float,vperp::mk_float)
+    etap = eta_func(uparsp,vthsp,vpa,vperp)
+    eta = eta_func(upars,vths,vpa,vperp)
+    prefac = -2.0*(vperp)*denss*denssp*exp( -eta^2)/(vthsp*vths^5)
     (fac = (d2Gdeta2(etap) + (ms/msp)*((vths/vthsp)^2)*dHdeta(etap)/etap)
-             + ((uparsp - upars)*(vpa.grid[ivpa]-uparsp)/vthsp^2)*ddGddeta(etap)/etap )
+             + ((uparsp - upars)*(vpa-uparsp)/vthsp^2)*ddGddeta(etap)/etap )
     Cflux = prefac*fac
     #fac *= (ms/msp)*(vths/vthsp)*dHdeta(etap)/etap
     #fac *= d2Gdeta2(etap) 

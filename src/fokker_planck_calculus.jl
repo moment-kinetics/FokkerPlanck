@@ -2578,7 +2578,7 @@ function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::r
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                dummy_vpavperp[ivpa,ivperp] = pdf[ivpa,ivperp] - F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                dummy_vpavperp[ivpa,ivperp] = pdf[ivpa,ivperp] - F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -2590,43 +2590,43 @@ function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::r
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
-                rpbd.H_data.lower_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.H_data.upper_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
-                rpbd.dHdvpa_data.lower_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.dHdvpa_data.upper_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
-                rpbd.dHdvperp_data.lower_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.dHdvperp_data.upper_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
-                rpbd.d2Gdvpa2_data.lower_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.d2Gdvpa2_data.upper_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
-                rpbd.d2Gdvperpdvpa_data.lower_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.d2Gdvperpdvpa_data.upper_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
-                rpbd.d2Gdvperp2_data.lower_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                rpbd.d2Gdvperp2_data.upper_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
+                rpbd.H_data.lower_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.H_data.upper_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
+                rpbd.dHdvpa_data.lower_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.dHdvpa_data.upper_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
+                rpbd.dHdvperp_data.lower_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.dHdvperp_data.upper_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
+                rpbd.d2Gdvpa2_data.lower_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.d2Gdvpa2_data.upper_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
+                rpbd.d2Gdvperpdvpa_data.lower_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.d2Gdvperpdvpa_data.upper_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
+                rpbd.d2Gdvperp2_data.lower_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                rpbd.d2Gdvperp2_data.upper_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
     end
     @inbounds for ivpa in 1:vpa.n
-                rpbd.H_data.upper_boundary_vperp[ivpa] += H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
-                rpbd.dHdvpa_data.upper_boundary_vperp[ivpa] += dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
-                rpbd.dHdvperp_data.upper_boundary_vperp[ivpa] += dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
-                rpbd.d2Gdvpa2_data.upper_boundary_vperp[ivpa] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
-                rpbd.d2Gdvperpdvpa_data.upper_boundary_vperp[ivpa] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
-                rpbd.d2Gdvperp2_data.upper_boundary_vperp[ivpa] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
+                rpbd.H_data.upper_boundary_vperp[ivpa] += H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
+                rpbd.dHdvpa_data.upper_boundary_vperp[ivpa] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
+                rpbd.dHdvperp_data.upper_boundary_vperp[ivpa] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
+                rpbd.d2Gdvpa2_data.upper_boundary_vperp[ivpa] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
+                rpbd.d2Gdvperpdvpa_data.upper_boundary_vperp[ivpa] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
+                rpbd.d2Gdvperp2_data.upper_boundary_vperp[ivpa] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
     end
     if calculate_GG
        @inbounds for ivperp in 1:vperp.n
-                   rpbd.G_data.lower_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                   rpbd.G_data.upper_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
+                   rpbd.G_data.lower_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                   rpbd.G_data.upper_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
        end
        @inbounds for ivpa in 1:vpa.n
-                   rpbd.G_data.upper_boundary_vperp[ivpa] += G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
+                   rpbd.G_data.upper_boundary_vperp[ivpa] += G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
        end
     end
     if calculate_dGdvperp
        @inbounds for ivperp in 1:vperp.n
-                   rpbd.dGdvperp_data.lower_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,1,ivperp)
-                   rpbd.dGdvperp_data.upper_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,nvpa,ivperp)
+                   rpbd.dGdvperp_data.lower_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
+                   rpbd.dGdvperp_data.upper_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
        end
        @inbounds for ivpa in 1:vpa.n
-                   rpbd.dGdvperp_data.upper_boundary_vperp[ivpa] += dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,nvperp)
+                   rpbd.dGdvperp_data.upper_boundary_vperp[ivpa] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
        end
     end
     return nothing
@@ -3525,14 +3525,14 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                GG[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                HH[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                d2Gdvpa2[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                d2Gdvperp2[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                dGdvperp[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                d2Gdvperpdvpa[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                dHdvpa[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                dHdvperp[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                GG[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                HH[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                d2Gdvpa2[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                d2Gdvperp2[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                dGdvperp[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                d2Gdvperpdvpa[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                dHdvpa[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                dHdvperp[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end

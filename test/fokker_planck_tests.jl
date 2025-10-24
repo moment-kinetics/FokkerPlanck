@@ -103,8 +103,8 @@ function backward_Euler_linearised_collisions_test(;
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                FMaxwell[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                pdf[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                FMaxwell[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                pdf[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -167,7 +167,7 @@ function diagnose_F_Maxwellian(pdf,pdf_exact,pdf_dummy_1,pdf_dummy_2,vpa,vperp,t
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                pdf_exact[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                pdf_exact[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -242,7 +242,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    Fold[ivpa,ivperp,is] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                    Fold[ivpa,ivperp,is] = F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -298,7 +298,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
             vth[is] = sqrt(2.0*pressure/(density[is]*species.mass[is]))
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    FMaxwell[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                    FMaxwell[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -398,8 +398,8 @@ function multi_species_numerical_error_corrections_test(;
     for is in 1:species.n
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                pdf_new[ivpa,ivperp,is] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
-                                            + F_Beam(0.0,vperp0,vth0,vpa,vperp,ivpa,ivperp))
+                pdf_new[ivpa,ivperp,is] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
+                                            + F_Beam(0.0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp]))
             end
         end
     end
@@ -435,7 +435,7 @@ function multi_species_numerical_error_corrections_test(;
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    pdf_old[ivpa,ivperp,is] = F_Maxwellian(densitys[is],upars[is],vths[is],vpa,vperp,ivpa,ivperp)
+                    pdf_old[ivpa,ivperp,is] = F_Maxwellian(densitys[is],upars[is],vths[is],vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -502,10 +502,10 @@ function test_interpolate_2D_vspace(; ngrid=9,
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-            Fe[ivpa,ivperp] = F_Maxwellian(dense,upare,vthe,vpa,vperp,ivpa,ivperp)
-            Fe_exact_ion_units[ivpa,ivperp] = F_Maxwellian(dense,upare/scalefac,vthe/scalefac,vpa,vperp,ivpa,ivperp)/(scalefac^3)
-            Fi[ivpa,ivperp] = F_Maxwellian(densi,upari,vthi,vpa,vperp,ivpa,ivperp)
-            Fi_exact_electron_units[ivpa,ivperp] = (scalefac^3)*F_Maxwellian(densi,upari*scalefac,vthi*scalefac,vpa,vperp,ivpa,ivperp)
+            Fe[ivpa,ivperp] = F_Maxwellian(dense,upare,vthe,vpa.grid[ivpa],vperp.grid[ivperp])
+            Fe_exact_ion_units[ivpa,ivperp] = F_Maxwellian(dense,upare/scalefac,vthe/scalefac,vpa.grid[ivpa],vperp.grid[ivperp])/(scalefac^3)
+            Fi[ivpa,ivperp] = F_Maxwellian(densi,upari,vthi,vpa.grid[ivpa],vperp.grid[ivperp])
+            Fi_exact_electron_units[ivpa,ivperp] = (scalefac^3)*F_Maxwellian(densi,upari*scalefac,vthi*scalefac,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -651,8 +651,8 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
             for is in 1:species.n
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        F_M[ivpa,ivperp,is] = (F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp) +
-                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa,vperp,ivpa,ivperp))
+                        F_M[ivpa,ivperp,is] = (F_Maxwellian(density[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp]) +
+                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa.grid[ivpa],vperp.grid[ivperp]))
                     end
                 end
                 # use this commented code to assess how far from Maxwellian F_M is
@@ -682,16 +682,16 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
                             #                 + nfac^2 * C[F_sB,F_s'B]
                             C_M_exact[ivpa,ivperp,is] += (Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
                                                                             density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             nfac*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
                                                                             density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             nfac*Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
                                                                             density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             (nfac^2)*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
                                                                             density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp))
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]))
                         end
                     end
                 end
@@ -769,7 +769,7 @@ function slowing_down_fokker_planck_collisions_test(;
             for isp in 1:nsprime
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa,vperp,ivpa,ivperp)
+                        Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -797,7 +797,7 @@ function slowing_down_fokker_planck_collisions_test(;
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    Fs_M[ivpa,ivperp,is] = F_Maxwellian(dens[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                    Fs_M[ivpa,ivperp,is] = F_Maxwellian(dens[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp])
                     C_M_exact[ivpa,ivperp,is] = 0.0
                 end
             end
@@ -811,7 +811,7 @@ function slowing_down_fokker_planck_collisions_test(;
                     for ivpa in 1:vpa.n
                             C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
                                                                         dens[isp],upar[isp],vth[isp],species.mass[isp],species.zeds[isp],
-                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                                                                        nuref,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -821,7 +821,7 @@ function slowing_down_fokker_planck_collisions_test(;
                     for ivpa in 1:vpa.n
                             C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
                                                                         denssp[isp],uparsp[isp],vthsp[isp],msp[isp],Zsp[isp],
-                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                                                                        nuref,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -988,15 +988,15 @@ function runtests()
 
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                        dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
                 rpbd_exact = rosenbluth_potential_boundary_data(vpa,vperp)
@@ -1166,11 +1166,11 @@ function runtests()
                 nussp = 1.0
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        Fs_M[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                        Fs_M[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
                         C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,Zs,
                                                                         dens,upar,vth,msp,Zsp,
-                                                                        nussp,vpa,vperp,ivpa,ivperp)
+                                                                        nussp,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
                 fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
@@ -1333,15 +1333,15 @@ function runtests()
             dens, upar, vth = 1.0, 1.0, 1.0
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                    F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
             # calculate the potentials numerically
