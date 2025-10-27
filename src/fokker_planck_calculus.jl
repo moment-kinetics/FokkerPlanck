@@ -902,7 +902,7 @@ struct fixed_background_plasma_info
         end
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],pdf[:,:,is],
-             vpa,vperp,fprp_solver_data,species.mass[is],
+             vpa,vperp,fprp_solver_data,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
         end
@@ -2645,7 +2645,7 @@ a Maxwellian, and the multipole expansion for the remainder.
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
     expansion_data::delta_f_multipole_moments,
     pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
-    vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate;
     calculate_GG=false,calculate_dGdvperp=false)
     # get required moments of pdf
     calculate_multipole_expansion_moments!(expansion_data,pdf,dummy_vpavperp,vpa,vperp)
@@ -2815,7 +2815,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,2},
         calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,pdf,vpa,vperp,msp)
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,pdf,
-             vpa,vperp,fp_operator.fprp_solver_data,msp,
+             vpa,vperp,fp_operator.fprp_solver_data,
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     end
@@ -2855,7 +2855,7 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{mk_float,3},
     else
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(
-                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_solver_data,species.mass[is],
+                rosenbluth_potentials_s[is],pdf[:,:,is],vpa,vperp,fp_operator.fprp_solver_data,
                 algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
                 calculate_dGdvperp=false)
         end
@@ -3358,7 +3358,7 @@ to solve the PDE matrix equations.
 function calculate_rosenbluth_potentials_via_elliptic_solve!(
              rosenbluth_potentials::rosenbluth_potential_data,ffsp_in::AbstractArray{mk_float,2},
              vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-             fkpl_arrays::fokkerplanck_rosenbluth_potential_solver_data, mass::mk_float;
+             fkpl_arrays::fokkerplanck_rosenbluth_potential_solver_data;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
              calculate_dGdvperp=false)
     GG = rosenbluth_potentials.GG
@@ -3399,7 +3399,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(
         calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,multipole_expansion_moments,ffsp_in,vpa,vperp,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == delta_f_multipole # use a variant of the multipole method
-        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,multipole_expansion_moments,ffsp_in,S_dummy,vpa,vperp,mass,
+        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,multipole_expansion_moments,ffsp_in,S_dummy,vpa,vperp,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == direct_integration  # use direct integration on the boundary
         calculate_rosenbluth_potential_boundary_data!(rpbd,bwgt,ffsp_in,vpa,vperp,

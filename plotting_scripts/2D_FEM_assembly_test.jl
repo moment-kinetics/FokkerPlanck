@@ -229,7 +229,7 @@ end
         end
         # calculate Rosenbluth potentials again as a standalone to G and dGdvperp
         calculate_rosenbluth_potentials_via_elliptic_solve!(fkpl_arrays.rosenbluth_potentials,F_M,
-             vpa,vperp,fkpl_arrays.fprp_solver_data,msp;
+             vpa,vperp,fkpl_arrays.fprp_solver_data;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=true,calculate_dGdvperp=true)
         # extract C[Fs,Fs'] result
         # and Rosenbluth potentials for testing

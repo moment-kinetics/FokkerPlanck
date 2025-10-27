@@ -115,7 +115,7 @@ function fokker_planck_collision_operator_weak_form!(
         calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,ffsp_in,vpa,vperp,msp)
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,ffsp_in,
-             vpa,vperp,fkpl_arrays.fprp_solver_data,msp,
+             vpa,vperp,fkpl_arrays.fprp_solver_data,
              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
              calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     end
@@ -158,7 +158,7 @@ function fokker_planck_collision_operator_weak_form!(
     else
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],ff_in[:,:,is],
-                    vpa,vperp,fkpl_arrays.fprp_solver_data,species.mass[is],
+                    vpa,vperp,fkpl_arrays.fprp_solver_data,
                     algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end

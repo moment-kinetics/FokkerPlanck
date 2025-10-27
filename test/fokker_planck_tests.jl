@@ -926,7 +926,7 @@ function rosenbluth_potential_solver_test(;
     # calculate the potentials numerically
     calculate_rosenbluth_potentials_via_elliptic_solve!(
             fkpl_arrays.rosenbluth_potentials, F_M, vpa, vperp,
-            fkpl_arrays.fprp_solver_data, species.mass[1]; algebraic_solve_for_d2Gdvperp2=false,
+            fkpl_arrays.fprp_solver_data; algebraic_solve_for_d2Gdvperp2=false,
             calculate_GG=true, calculate_dGdvperp=true)
     # extract C[Fs,Fs'] result
     # and Rosenbluth potentials for testing
