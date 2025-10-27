@@ -12,7 +12,7 @@ using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inp
                                 natural_boundary_condition, zero_boundary_condition
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
-using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole,
+using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole, boundary_data_type,
                                             repeat_assembly_per_species, single_assembly_per_species
 
 using FokkerPlanck: fokker_planck_backward_euler_data, fokker_planck_collision_operator_weak_form!
@@ -539,7 +539,8 @@ end
 function test_interpolate_2D_vspace_new(; ngrid=9,
                                 nelement_vpa=16,
                                 nelement_vperp = 8,
-                                rtol = 1.0e-14)
+                                rtol = 1.0e-14,
+                                boundary_data_option=multipole_expansion::boundary_data_type)
     ngrid = 9
     nelement_vpa = 16
     nelement_vperp = 8
@@ -563,13 +564,13 @@ function test_interpolate_2D_vspace_new(; ngrid=9,
     # Rosenbluth potentials on natural grids
     rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
     # Rosenbluth potentials on grid of another species, analytical
-    rosenbluth_potentials_s_converted_exact = rosenbluth_potential_data(vpa,vperp)
+    rosenbluth_potentials_s_converted_exact = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
     # Rosenbluth potentials converted from natural grids to grid of another species
-    rosenbluth_potentials_s_converted_numerical = rosenbluth_potential_data(vpa,vperp)
+    rosenbluth_potentials_s_converted_numerical = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
     # array for testing errors
     vpavperp_err = allocate_float(vpa.n,vperp.n)
     for is in 1:species.n
-        rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+        rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
         # get moments for Rosenbluth potentials on natural grids
         density_in = density[is]/n0ref[is]
         upar_in = (upar[is] - u0ref[is])/c0ref[is]

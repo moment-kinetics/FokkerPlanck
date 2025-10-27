@@ -703,6 +703,11 @@ struct assembled_matrix_operators_sparse
     end
 end
 
+struct delta_f_multipole_moments
+    Inm_vec::Vector{mk_float}
+    Maxwellian_moments::Vector{mk_float}
+end
+
 struct rosenbluth_potential_data
     # dummy arrays for storing Rosenbluth potentials (vpa,vperp)
     GG::Array{mk_float,2}
@@ -714,9 +719,10 @@ struct rosenbluth_potential_data
     d2Gdvpa2::Array{mk_float,2}
     d2Gdvperpdvpa::Array{mk_float,2}
     # the moments required to reconstuct the multipole expansion
-    Inn_vec::Vector{mk_float}
+    multipole_expansion_moments::Union{delta_f_multipole_moments,Vector{mk_float}}
     function rosenbluth_potential_data(vpa::finite_element_coordinate,
-                                vperp::finite_element_coordinate)
+                                vperp::finite_element_coordinate,
+                                boundary_data_option::boundary_data_type)
         GG = allocate_float(vpa.n,vperp.n)
         HH = allocate_float(vpa.n,vperp.n)
         dHdvpa = allocate_float(vpa.n,vperp.n)
@@ -725,9 +731,15 @@ struct rosenbluth_potential_data
         d2Gdvperp2 = allocate_float(vpa.n,vperp.n)
         d2Gdvpa2 = allocate_float(vpa.n,vperp.n)
         d2Gdvperpdvpa = allocate_float(vpa.n,vperp.n)
-        Inn_vec = allocate_float(25)
+        Inm_vec = allocate_float(25)
+        Maxwellian_moments = allocate_float(3)
+        if boundary_data_option == delta_f_multipole
+            multipole_expansion_moments = delta_f_multipole_moments(Inm_vec,Maxwellian_moments)
+        else
+            multipole_expansion_moments = Inm_vec
+        end
         return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
-                    Inn_vec)
+                    multipole_expansion_moments)
     end
 end
 
@@ -857,7 +869,6 @@ struct fixed_background_plasma_info
                                     pdf::pdf_moments,
                                     vpa::finite_element_coordinate,
                                     vperp::finite_element_coordinate,
-                                    # unused input kept to permit the same interface
                                     fprp_solver_data::fokkerplanck_rosenbluth_potential_solver_data)
         density = pdf.density
         upar = pdf.upar
@@ -867,7 +878,8 @@ struct fixed_background_plasma_info
         @boundscheck species.n == length(vth) || throw(BoundsError(vth))
         rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
         for is in 1:species.n
-            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,
+                                            fprp_solver_data.boundary_data_option)
         end
         for is in 1:species.n
             calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
@@ -884,7 +896,8 @@ struct fixed_background_plasma_info
         @boundscheck (species.n == size(pdf,3) && vperp.n == size(pdf,2) && vpa.n == size(pdf,1)) || throw(BoundsError(pdf))
         rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
         for is in 1:species.n
-            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,
+                                            fprp_solver_data.boundary_data_option)
         end
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],pdf[:,:,is],
@@ -954,9 +967,9 @@ struct fokkerplanck_weakform_arrays_struct
         nvpa, nvperp, nspecies = vpa.n, vperp.n, species.n
         rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,nspecies)
         for is in 1:nspecies
-            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp)
+            rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
         end
-        rosenbluth_potentials = rosenbluth_potential_data(vpa,vperp)
+        rosenbluth_potentials = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
 
         # multi-species conserving corrections
         delta_n_sp_s = allocate_float(nspecies,nspecies)
@@ -2179,12 +2192,12 @@ struct d2Gdvperp2Label <: AbstractRosenbluthPotentialLabel end
 struct d2Gdvpa2Label <: AbstractRosenbluthPotentialLabel end
 struct d2GdvperpdvpaLabel <: AbstractRosenbluthPotentialLabel end
 
-function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    H_series = (I80*((128*vpa^8 - 1792*vpa^6*vperp^2 + 3360*vpa^4*vperp^4 - 1120*vpa^2*vperp^6 + 35*vperp^8)/(128*(vpa^2 + vperp^2)^8))
              +I70*((vpa*(16*vpa^6 - 168*vpa^4*vperp^2 + 210*vpa^2*vperp^4 - 35*vperp^6))/(16*(vpa^2 + vperp^2)^7))
@@ -2216,12 +2229,12 @@ function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inn_vec::V
    return H_series
 end
 
-function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    dHdvpa_series = (I80*((9*vpa*(128*vpa^8 - 2304*vpa^6*vperp^2 + 6048*vpa^4*vperp^4 - 3360*vpa^2*vperp^6 + 315*vperp^8))/(128*(vpa^2 + vperp^2)^8))
                 +I70*((128*vpa^8 - 1792*vpa^6*vperp^2 + 3360*vpa^4*vperp^4 - 1120*vpa^2*vperp^6 + 35*vperp^8)/(16*(vpa^2 + vperp^2)^7))
@@ -2253,12 +2266,12 @@ function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inn_v
    return dHdvpa_series
 end
 
-function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    dHdvperp_series = (I80*((45*vperp*(128*vpa^8 - 896*vpa^6*vperp^2 + 1120*vpa^4*vperp^4 - 280*vpa^2*vperp^6 + 7*vperp^8))/(128*(vpa^2 + vperp^2)^8))
                 +I70*((9*vpa*vperp*(64*vpa^6 - 336*vpa^4*vperp^2 + 280*vpa^2*vperp^4 - 35*vperp^6))/(16*(vpa^2 + vperp^2)^7))
@@ -2290,12 +2303,12 @@ function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inn
    return dHdvperp_series
 end
 
-function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    G_series = (I80*((64*vpa^6*vperp^2 - 240*vpa^4*vperp^4 + 120*vpa^2*vperp^6 - 5*vperp^8)/(128*(vpa^2 + vperp^2)^8))
              +I70*((vpa*vperp^2*(8*vpa^4 - 20*vpa^2*vperp^2 + 5*vperp^4))/(16*(vpa^2 + vperp^2)^7))
@@ -2327,12 +2340,12 @@ function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inn_vec::V
    return G_series
 end
 
-function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    dGdvperp_series = (I80*((vperp*(128*vpa^8 - 1792*vpa^6*vperp^2 + 3360*vpa^4*vperp^4 - 1120*vpa^2*vperp^6 + 35*vperp^8))/(128*(vpa^2 + vperp^2)^8))
                    +I70*((vpa*vperp*(16*vpa^6 - 168*vpa^4*vperp^2 + 210*vpa^2*vperp^4 - 35*vperp^6))/(16*(vpa^2 + vperp^2)^7))
@@ -2364,12 +2377,12 @@ function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inn
    return dGdvperp_series
 end
 
-function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    d2Gdvperp2_series = (I80*((128*vpa^10 - 7424*vpa^8*vperp^2 + 41888*vpa^6*vperp^4 - 48160*vpa^4*vperp^6 + 11515*vpa^2*vperp^8 - 280*vperp^10)/(128*(vpa^2 + vperp^2)^8))
                    +I70*((16*vpa^9 - 728*vpa^7*vperp^2 + 3066*vpa^5*vperp^4 - 2345*vpa^3*vperp^6 + 280*vpa*vperp^8)/(16*(vpa^2 + vperp^2)^7))
@@ -2401,12 +2414,12 @@ function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,I
    return d2Gdvperp2_series
 end
 
-function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    d2Gdvperpdvpa_series = (I80*((9*vpa*vperp*(128*vpa^8 - 2304*vpa^6*vperp^2 + 6048*vpa^4*vperp^4 - 3360*vpa^2*vperp^6 + 315*vperp^8))/(128*(vpa^2 + vperp^2)^8))
                       +I70*((vperp*(128*vpa^8 - 1792*vpa^6*vperp^2 + 3360*vpa^4*vperp^4 - 1120*vpa^2*vperp^6 + 35*vperp^8))/(16*(vpa^2 + vperp^2)^7))
@@ -2438,12 +2451,12 @@ function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_floa
    return d2Gdvperpdvpa_series
 end
 
-function multipole_series(label::d2Gdvpa2Label,vpa::mk_float,vperp::mk_float,Inn_vec::Vector{mk_float})
+function multipole_series(label::d2Gdvpa2Label,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
    I04, I14, I24, I34, I44,
    I06, I16, I26,
-   I08) = Inn_vec
+   I08) = Inm_vec
    # sum up terms in the multipole series
    d2Gdvpa2_series = (I80*((45*vperp^2*(128*vpa^8 - 896*vpa^6*vperp^2 + 1120*vpa^4*vperp^4 - 280*vpa^2*vperp^6 + 7*vperp^8))/(128*(vpa^2 + vperp^2)^8))
                    +I70*((9*vpa*vperp^2*(64*vpa^6 - 336*vpa^4*vperp^2 + 280*vpa^2*vperp^4 - 35*vperp^6))/(16*(vpa^2 + vperp^2)^7))
@@ -2481,15 +2494,15 @@ function calculate_boundary_data_multipole!(func_data::vpa_vperp_boundary_data,
                                             label::AbstractRosenbluthPotentialLabel,
                                             vpa::finite_element_coordinate,
                                             vperp::finite_element_coordinate,
-                                            Inn_vec::Vector{mk_float})
+                                            Inm_vec::Vector{mk_float})
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
-                func_data.lower_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[1],vperp.grid[ivperp],Inn_vec)
-                func_data.upper_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[nvpa],vperp.grid[ivperp],Inn_vec)
+                func_data.lower_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[1],vperp.grid[ivperp],Inm_vec)
+                func_data.upper_boundary_vpa[ivperp] = multipole_series(label,vpa.grid[nvpa],vperp.grid[ivperp],Inm_vec)
     end
     @inbounds for ivpa in 1:vpa.n
-                func_data.upper_boundary_vperp[ivpa] = multipole_series(label,vpa.grid[ivpa],vperp.grid[nvperp],Inn_vec)
+                func_data.upper_boundary_vperp[ivpa] = multipole_series(label,vpa.grid[ivpa],vperp.grid[nvperp],Inm_vec)
     end
     return nothing
 end
@@ -2500,7 +2513,7 @@ assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in 
 without allocation.
 """
 function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenbluth_potential_boundary_data,
-    Inn_vec::Vector{mk_float},
+    Inm_vec::Vector{mk_float},
     pdf::AbstractArray{mk_float,2},vpa::finite_element_coordinate,vperp::finite_element_coordinate;
     calculate_GG=false,calculate_dGdvperp=false)
     @inbounds begin
@@ -2535,24 +2548,24 @@ function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenblut
 
         I08 = integral(pdf, vpa.grid, 0, vpa.wgts, vperp.grid, 8, vperp.wgts)
         # group into vector to pass around
-        Inn_vec .= [I00, I10, I20, I30, I40, I50, I60, I70, I80,
+        Inm_vec .= [I00, I10, I20, I30, I40, I50, I60, I70, I80,
                     I02, I12, I22, I32, I42, I52, I62,
                     I04, I14, I24, I34, I44,
                     I06, I16, I26,
                     I08]
         # evaluate the multipole formulae
-        calculate_boundary_data_multipole!(rpbd.H_data,HLabel(),vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole!(rpbd.dHdvpa_data,dHdvpaLabel(),vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole!(rpbd.dHdvperp_data,dHdvperpLabel(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.H_data,HLabel(),vpa,vperp,Inm_vec)
+        calculate_boundary_data_multipole!(rpbd.dHdvpa_data,dHdvpaLabel(),vpa,vperp,Inm_vec)
+        calculate_boundary_data_multipole!(rpbd.dHdvperp_data,dHdvperpLabel(),vpa,vperp,Inm_vec)
         if calculate_GG
-            calculate_boundary_data_multipole!(rpbd.G_data,GLabel(),vpa,vperp,Inn_vec)
+            calculate_boundary_data_multipole!(rpbd.G_data,GLabel(),vpa,vperp,Inm_vec)
         end
         if calculate_dGdvperp
-            calculate_boundary_data_multipole!(rpbd.dGdvperp_data,dGdvperpLabel(),vpa,vperp,Inn_vec)
+            calculate_boundary_data_multipole!(rpbd.dGdvperp_data,dGdvperpLabel(),vpa,vperp,Inm_vec)
         end
-        calculate_boundary_data_multipole!(rpbd.d2Gdvperp2_data,d2Gdvperp2Label(),vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole!(rpbd.d2Gdvperpdvpa_data,d2GdvperpdvpaLabel(),vpa,vperp,Inn_vec)
-        calculate_boundary_data_multipole!(rpbd.d2Gdvpa2_data,d2Gdvpa2Label(),vpa,vperp,Inn_vec)
+        calculate_boundary_data_multipole!(rpbd.d2Gdvperp2_data,d2Gdvperp2Label(),vpa,vperp,Inm_vec)
+        calculate_boundary_data_multipole!(rpbd.d2Gdvperpdvpa_data,d2GdvperpdvpaLabel(),vpa,vperp,Inm_vec)
+        calculate_boundary_data_multipole!(rpbd.d2Gdvpa2_data,d2Gdvpa2Label(),vpa,vperp,Inm_vec)
         return nothing
     end
 end
@@ -2564,11 +2577,13 @@ without allocation. Use the exact results for the part of F that can be describe
 a Maxwellian, and the multipole expansion for the remainder.
 """
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
-    Inn_vec::Vector{mk_float},
+    expansion_data::delta_f_multipole_moments,
     pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
     vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
     calculate_GG=false,calculate_dGdvperp=false)
 
+    Inm_vec = expansion_data.Inm_vec
+    Maxwellian_moments = expansion_data.Maxwellian_moments
     dens = get_density(pdf, vpa, vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
     pressure = get_pressure(pdf, vpa, vperp, upar, mass)
@@ -2582,8 +2597,10 @@ function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::r
             end
         end
     end
+    # store Maxwellian moments for use elsewhere
+    @. Maxwellian_moments = [dens, upar, vth]
     # now pass the delta f to the multipole function
-    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inn_vec,dummy_vpavperp,
+    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inm_vec,dummy_vpavperp,
       vpa,vperp,
       calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     # now add on the contributions from the Maxwellian
@@ -3346,7 +3363,7 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
     d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
     d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
-    Inn_vec = rosenbluth_potentials.Inn_vec
+    multipole_expansion_moments = rosenbluth_potentials.multipole_expansion_moments
     # extract the necessary precalculated and buffer arrays from fokkerplanck_arrays
     matrix_operators = fkpl_arrays.matrix_operators
     MM2D_sparse = matrix_operators.MM2D_sparse
@@ -3373,10 +3390,10 @@ function calculate_rosenbluth_potentials_via_elliptic_solve!(
     boundary_data_option = fkpl_arrays.boundary_data_option
     # calculate the boundary data
     if boundary_data_option == multipole_expansion
-        calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inn_vec,ffsp_in,vpa,vperp,
+        calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,multipole_expansion_moments,ffsp_in,vpa,vperp,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == delta_f_multipole # use a variant of the multipole method
-        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,Inn_vec,ffsp_in,S_dummy,vpa,vperp,mass,
+        calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd,multipole_expansion_moments,ffsp_in,S_dummy,vpa,vperp,mass,
           calculate_GG=calculate_GG,calculate_dGdvperp=(calculate_dGdvperp||algebraic_solve_for_d2Gdvperp2))
     elseif boundary_data_option == direct_integration  # use direct integration on the boundary
         calculate_rosenbluth_potential_boundary_data!(rpbd,bwgt,ffsp_in,vpa,vperp,
