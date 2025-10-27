@@ -21,7 +21,8 @@ export calculate_test_particle_preconditioner!
 export advance_linearised_test_particle_collisions!
 export density_conserving_correction!, conserving_corrections!
 export species_info, calculate_cross_species_rosenbluth_potential_sums!
-export calculate_rosenbluth_potential_boundary_data_exact!
+export calculate_rosenbluth_potential_boundary_data_exact!,
+    calculate_analytical_Maxwellian_multipole_expansion_moments!
 export test_rosenbluth_potential_boundary_data
 export interpolate_2D_vspace!
 export matrix_inverse
@@ -3544,6 +3545,7 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     d2Gdvperp2 = rosenbluth_potentials.d2Gdvperp2
     d2Gdvpa2 = rosenbluth_potentials.d2Gdvpa2
     d2Gdvperpdvpa = rosenbluth_potentials.d2Gdvperpdvpa
+    expansion_data = rosenbluth_potentials.multipole_expansion_moments
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -3558,7 +3560,70 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
             end
         end
     end
+    calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data,dens,upar,vth)
     return nothing
+end
+function calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data::delta_f_multipole_moments,dens,upar,vth)
+    expansion_data.Maxwellian_moments .= [dens,upar,vth]
+    calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data.Inm_vec,
+            dens,upar,vth)
+    return nothing
+end
+function calculate_analytical_Maxwellian_multipole_expansion_moments!(Inm_vec::Vector{mk_float},
+            dens::mk_float,upar::mk_float,vth::mk_float)
+    I00 = FMaxwell_moment(0,0,dens,upar,vth)
+    I10 = FMaxwell_moment(1,0,dens,upar,vth)
+    I20 = FMaxwell_moment(2,0,dens,upar,vth)
+    I30 = FMaxwell_moment(3,0,dens,upar,vth)
+    I40 = FMaxwell_moment(4,0,dens,upar,vth)
+    I50 = FMaxwell_moment(5,0,dens,upar,vth)
+    I60 = FMaxwell_moment(6,0,dens,upar,vth)
+    I70 = FMaxwell_moment(7,0,dens,upar,vth)
+    I80 = FMaxwell_moment(8,0,dens,upar,vth)
+
+    I02 = FMaxwell_moment(0,2,dens,upar,vth)
+    I12 = FMaxwell_moment(1,2,dens,upar,vth)
+    I22 = FMaxwell_moment(2,2,dens,upar,vth)
+    I32 = FMaxwell_moment(3,2,dens,upar,vth)
+    I42 = FMaxwell_moment(4,2,dens,upar,vth)
+    I52 = FMaxwell_moment(5,2,dens,upar,vth)
+    I62 = FMaxwell_moment(6,2,dens,upar,vth)
+
+    I04 = FMaxwell_moment(0,4,dens,upar,vth)
+    I14 = FMaxwell_moment(1,4,dens,upar,vth)
+    I24 = FMaxwell_moment(2,4,dens,upar,vth)
+    I34 = FMaxwell_moment(3,4,dens,upar,vth)
+    I44 = FMaxwell_moment(4,4,dens,upar,vth)
+
+    I06 = FMaxwell_moment(0,6,dens,upar,vth)
+    I16 = FMaxwell_moment(1,6,dens,upar,vth)
+    I26 = FMaxwell_moment(2,6,dens,upar,vth)
+
+    I08 = FMaxwell_moment(0,8,dens,upar,vth)
+
+    Inm_vec .= [I00, I10, I20, I30, I40, I50, I60, I70, I80,
+                    I02, I12, I22, I32, I42, I52, I62,
+                    I04, I14, I24, I34, I44,
+                    I06, I16, I26,
+                    I08]
+    return nothing
+end
+function FMaxwell_moment(n::mk_int,m::mk_int,
+            dens::mk_float,upar::mk_float,vth::mk_float)
+    prefactor = dens*vth^(m+n)
+    Im = factorial(Int(m/2)) # perpendicular integral I_m = 2 int^infty_0 x^{m+1} exp(-x^2) d x
+    In = 0.0 # parallel integral 1/sqrt(pi) * int^infty_-infty (y + upar/vth)^n exp(-y^2) d y
+    for j in 0:n
+        if mod(j,2) == 0 # J_j = 0 for odd j
+            if j > 0
+                Jj = (2.0^(-j+1))*factorial(j-1)/factorial(Int(j/2)-1) # J_j = int^infty_-infty y^(j) exp(-y^2) d y / sqrt(pi)
+            else
+                Jj = 1.0
+            end
+            In += binomial(n,j)*Jj*((upar/vth)^(n-j))
+        end
+    end
+    return prefactor*Im*In
 end
 """
 Function to carry out the integration of the revelant
