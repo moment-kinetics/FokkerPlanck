@@ -2192,6 +2192,38 @@ struct d2Gdvperp2Label <: AbstractRosenbluthPotentialLabel end
 struct d2Gdvpa2Label <: AbstractRosenbluthPotentialLabel end
 struct d2GdvperpdvpaLabel <: AbstractRosenbluthPotentialLabel end
 
+function rosenbluth_potential_Maxwellian(label::HLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return H_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::dHdvpaLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::dHdvperpLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::GLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return G_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::dGdvperpLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::d2Gdvperp2Label,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::d2GdvperpdvpaLabel,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+function rosenbluth_potential_Maxwellian(label::d2Gdvpa2Label,dens::mk_float,upar::mk_float,vth::mk_float,vpa::mk_float,vperp::mk_float)
+    return d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp)
+end
+
+function multipole_series(label::AbstractRosenbluthPotentialLabel,vpa::mk_float,vperp::mk_float,expansion_data::delta_f_multipole_moments)
+    (dens, upar, vth) = expansion_data.Maxwellian_moments
+    Inm_vec = expansion_data.Inm_vec
+    series =  multipole_series(label,vpa,vperp,Inm_vec)
+    series += rosenbluth_potential_Maxwellian(label,dens,upar,vth,vpa,vperp)
+    return series
+end
 function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2228,7 +2260,6 @@ function multipole_series(label::HLabel,vpa::mk_float,vperp::mk_float,Inm_vec::V
    H_series *= ((vpa^2 + vperp^2)^(-1/2))
    return H_series
 end
-
 function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2265,7 +2296,6 @@ function multipole_series(label::dHdvpaLabel,vpa::mk_float,vperp::mk_float,Inm_v
    dHdvpa_series *= -((vpa^2 + vperp^2)^(-3/2))
    return dHdvpa_series
 end
-
 function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2302,7 +2332,6 @@ function multipole_series(label::dHdvperpLabel,vpa::mk_float,vperp::mk_float,Inm
    dHdvperp_series *= -((vpa^2 + vperp^2)^(-3/2))
    return dHdvperp_series
 end
-
 function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2339,7 +2368,6 @@ function multipole_series(label::GLabel,vpa::mk_float,vperp::mk_float,Inm_vec::V
    G_series *= ((vpa^2 + vperp^2)^(1/2))
    return G_series
 end
-
 function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2376,7 +2404,6 @@ function multipole_series(label::dGdvperpLabel,vpa::mk_float,vperp::mk_float,Inm
    dGdvperp_series *= ((vpa^2 + vperp^2)^(-1/2))
    return dGdvperp_series
 end
-
 function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2413,7 +2440,6 @@ function multipole_series(label::d2Gdvperp2Label,vpa::mk_float,vperp::mk_float,I
    d2Gdvperp2_series *= ((vpa^2 + vperp^2)^(-3/2))
    return d2Gdvperp2_series
 end
-
 function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2450,7 +2476,6 @@ function multipole_series(label::d2GdvperpdvpaLabel,vpa::mk_float,vperp::mk_floa
    d2Gdvperpdvpa_series *= -((vpa^2 + vperp^2)^(-3/2))
    return d2Gdvperpdvpa_series
 end
-
 function multipole_series(label::d2Gdvpa2Label,vpa::mk_float,vperp::mk_float,Inm_vec::Vector{mk_float})
    (I00, I10, I20, I30, I40, I50, I60, I70, I80,
    I02, I12, I22, I32, I42, I52, I62,
@@ -2494,7 +2519,7 @@ function calculate_boundary_data_multipole!(func_data::vpa_vperp_boundary_data,
                                             label::AbstractRosenbluthPotentialLabel,
                                             vpa::finite_element_coordinate,
                                             vperp::finite_element_coordinate,
-                                            Inm_vec::Vector{mk_float})
+                                            Inm_vec::Union{Vector{mk_float},delta_f_multipole_moments})
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
@@ -2507,17 +2532,10 @@ function calculate_boundary_data_multipole!(func_data::vpa_vperp_boundary_data,
     return nothing
 end
 
-"""
-Function to use the multipole expansion of the Rosenbluth potentials to calculate and
-assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in place,
-without allocation.
-"""
-function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenbluth_potential_boundary_data,
-    Inm_vec::Vector{mk_float},
-    pdf::AbstractArray{mk_float,2},vpa::finite_element_coordinate,vperp::finite_element_coordinate;
-    calculate_GG=false,calculate_dGdvperp=false)
+function calculate_multipole_expansion_moments!(Inm_vec::Vector{mk_float},pdf::AbstractArray{mk_float,2},
+            vpa::finite_element_coordinate,vperp::finite_element_coordinate)
     @inbounds begin
-        # get required moments of pdf
+        # get required moments of pdf for the multipole expansion
         I00 = integral(pdf, vpa.grid, 0, vpa.wgts, vperp.grid, 0, vperp.wgts)
         I10 = integral(pdf, vpa.grid, 1, vpa.wgts, vperp.grid, 0, vperp.wgts)
         I20 = integral(pdf, vpa.grid, 2, vpa.wgts, vperp.grid, 0, vperp.wgts)
@@ -2553,39 +2571,17 @@ function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenblut
                     I04, I14, I24, I34, I44,
                     I06, I16, I26,
                     I08]
-        # evaluate the multipole formulae
-        calculate_boundary_data_multipole!(rpbd.H_data,HLabel(),vpa,vperp,Inm_vec)
-        calculate_boundary_data_multipole!(rpbd.dHdvpa_data,dHdvpaLabel(),vpa,vperp,Inm_vec)
-        calculate_boundary_data_multipole!(rpbd.dHdvperp_data,dHdvperpLabel(),vpa,vperp,Inm_vec)
-        if calculate_GG
-            calculate_boundary_data_multipole!(rpbd.G_data,GLabel(),vpa,vperp,Inm_vec)
-        end
-        if calculate_dGdvperp
-            calculate_boundary_data_multipole!(rpbd.dGdvperp_data,dGdvperpLabel(),vpa,vperp,Inm_vec)
-        end
-        calculate_boundary_data_multipole!(rpbd.d2Gdvperp2_data,d2Gdvperp2Label(),vpa,vperp,Inm_vec)
-        calculate_boundary_data_multipole!(rpbd.d2Gdvperpdvpa_data,d2GdvperpdvpaLabel(),vpa,vperp,Inm_vec)
-        calculate_boundary_data_multipole!(rpbd.d2Gdvpa2_data,d2Gdvpa2Label(),vpa,vperp,Inm_vec)
-        return nothing
     end
+    return nothing
 end
-
-"""
-Function to use the multipole expansion of the Rosenbluth potentials to calculate and
-assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in place,
-without allocation. Use the exact results for the part of F that can be described with
-a Maxwellian, and the multipole expansion for the remainder.
-"""
-function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
-    expansion_data::delta_f_multipole_moments,
-    pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
-    vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
-    calculate_GG=false,calculate_dGdvperp=false)
-
+function calculate_multipole_expansion_moments!(expansion_data::delta_f_multipole_moments,
+            pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
+            vpa::finite_element_coordinate,vperp::finite_element_coordinate)
     Inm_vec = expansion_data.Inm_vec
     Maxwellian_moments = expansion_data.Maxwellian_moments
     dens = get_density(pdf, vpa, vperp)
     upar = get_upar(pdf, vpa, vperp, dens)
+    mass = 1.0 # since we only divide by, then multiply by mass in the next two lines
     pressure = get_pressure(pdf, vpa, vperp, upar, mass)
     vth = sqrt(2.0*pressure/(dens*mass))
     ppar = get_ppar(pdf, vpa, vperp, upar, mass)
@@ -2599,53 +2595,62 @@ function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::r
     end
     # store Maxwellian moments for use elsewhere
     @. Maxwellian_moments = [dens, upar, vth]
-    # now pass the delta f to the multipole function
-    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inm_vec,dummy_vpavperp,
-      vpa,vperp,
-      calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
-    # now add on the contributions from the Maxwellian
-    nvpa = vpa.n
-    nvperp = vperp.n
-    @inbounds for ivperp in 1:vperp.n
-                rpbd.H_data.lower_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.H_data.upper_boundary_vpa[ivperp] += H_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-                rpbd.dHdvpa_data.lower_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.dHdvpa_data.upper_boundary_vpa[ivperp] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-                rpbd.dHdvperp_data.lower_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.dHdvperp_data.upper_boundary_vpa[ivperp] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-                rpbd.d2Gdvpa2_data.lower_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.d2Gdvpa2_data.upper_boundary_vpa[ivperp] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-                rpbd.d2Gdvperpdvpa_data.lower_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.d2Gdvperpdvpa_data.upper_boundary_vpa[ivperp] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-                rpbd.d2Gdvperp2_data.lower_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                rpbd.d2Gdvperp2_data.upper_boundary_vpa[ivperp] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-    end
-    @inbounds for ivpa in 1:vpa.n
-                rpbd.H_data.upper_boundary_vperp[ivpa] += H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-                rpbd.dHdvpa_data.upper_boundary_vperp[ivpa] += dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-                rpbd.dHdvperp_data.upper_boundary_vperp[ivpa] += dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-                rpbd.d2Gdvpa2_data.upper_boundary_vperp[ivpa] += d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-                rpbd.d2Gdvperpdvpa_data.upper_boundary_vperp[ivpa] += d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-                rpbd.d2Gdvperp2_data.upper_boundary_vperp[ivpa] += d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-    end
+    # get Inm from delta f
+    calculate_multipole_expansion_moments!(Inm_vec,dummy_vpavperp,vpa,vperp)
+    return nothing
+end
+
+"""
+Function to use the multipole expansion of the Rosenbluth potentials to calculate and
+assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in place,
+without allocation.
+"""
+function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenbluth_potential_boundary_data,
+    expansion_data::Union{Vector{mk_float},delta_f_multipole_moments},vpa::finite_element_coordinate,vperp::finite_element_coordinate;
+    calculate_GG=false,calculate_dGdvperp=false)
+    # evaluate the multipole formulae
+    calculate_boundary_data_multipole!(rpbd.H_data,HLabel(),vpa,vperp,expansion_data)
+    calculate_boundary_data_multipole!(rpbd.dHdvpa_data,dHdvpaLabel(),vpa,vperp,expansion_data)
+    calculate_boundary_data_multipole!(rpbd.dHdvperp_data,dHdvperpLabel(),vpa,vperp,expansion_data)
     if calculate_GG
-       @inbounds for ivperp in 1:vperp.n
-                   rpbd.G_data.lower_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                   rpbd.G_data.upper_boundary_vpa[ivperp] += G_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-       end
-       @inbounds for ivpa in 1:vpa.n
-                   rpbd.G_data.upper_boundary_vperp[ivpa] += G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-       end
+        calculate_boundary_data_multipole!(rpbd.G_data,GLabel(),vpa,vperp,expansion_data)
     end
     if calculate_dGdvperp
-       @inbounds for ivperp in 1:vperp.n
-                   rpbd.dGdvperp_data.lower_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[1],vperp.grid[ivperp])
-                   rpbd.dGdvperp_data.upper_boundary_vpa[ivperp] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[nvpa],vperp.grid[ivperp])
-       end
-       @inbounds for ivpa in 1:vpa.n
-                   rpbd.dGdvperp_data.upper_boundary_vperp[ivpa] += dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[nvperp])
-       end
+        calculate_boundary_data_multipole!(rpbd.dGdvperp_data,dGdvperpLabel(),vpa,vperp,expansion_data)
     end
+    calculate_boundary_data_multipole!(rpbd.d2Gdvperp2_data,d2Gdvperp2Label(),vpa,vperp,expansion_data)
+    calculate_boundary_data_multipole!(rpbd.d2Gdvperpdvpa_data,d2GdvperpdvpaLabel(),vpa,vperp,expansion_data)
+    calculate_boundary_data_multipole!(rpbd.d2Gdvpa2_data,d2Gdvpa2Label(),vpa,vperp,expansion_data)
+    return nothing
+end
+function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::rosenbluth_potential_boundary_data,
+    Inm_vec::Vector{mk_float},pdf::AbstractArray{mk_float,2},
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate;
+    calculate_GG=false,calculate_dGdvperp=false)
+    # get required moments of pdf
+    calculate_multipole_expansion_moments!(Inm_vec,pdf,vpa,vperp)
+    # evaluate the multipole formulae
+    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,Inm_vec,vpa,vperp,
+      calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
+    return nothing
+end
+
+"""
+Function to use the multipole expansion of the Rosenbluth potentials to calculate and
+assign boundary data to an instance of `rosenbluth_potential_boundary_data`, in place,
+without allocation. Use the exact results for the part of F that can be described with
+a Maxwellian, and the multipole expansion for the remainder.
+"""
+function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::rosenbluth_potential_boundary_data,
+    expansion_data::delta_f_multipole_moments,
+    pdf::AbstractArray{mk_float,2},dummy_vpavperp::AbstractArray{mk_float,2},
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate, mass::mk_float;
+    calculate_GG=false,calculate_dGdvperp=false)
+    # get required moments of pdf
+    calculate_multipole_expansion_moments!(expansion_data,pdf,dummy_vpavperp,vpa,vperp)
+    # now pass the delta f Inm to the multipole function
+    calculate_rosenbluth_potential_boundary_data_multipole!(rpbd,expansion_data,vpa,vperp,
+      calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     return nothing
 end
 
