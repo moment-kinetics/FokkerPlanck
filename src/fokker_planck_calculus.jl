@@ -49,7 +49,7 @@ using SparseArrays: sparse, AbstractSparseArray
 using SuiteSparse
 using LinearAlgebra: ldiv!, mul!, LU, ldiv, lu, lu!
 using FastGaussQuadrature
-using LagrangePolynomials: lagrange_poly
+using LagrangePolynomials: lagrange_poly, lagrange_poly_data
 using FiniteElementMatrices: lagrange_x,
                              d_lagrange_dx,
                              finite_element_matrix,
@@ -3827,6 +3827,7 @@ function interpolate_2D_vspace!(pdf_out::AbstractArray{mk_float,2},
         else
             # get data for interpolation
             vperp_lpoly_data = vperp.lpoly_data[iel_vperp]
+            vperp_igrid_full = @view vperp.igrid_full[:,iel_vperp]
         end
         @inbounds for ivpa in 1:vpa.n
             vpa_val = vpa.grid[ivpa]*scalefac
@@ -3838,27 +3839,52 @@ function interpolate_2D_vspace!(pdf_out::AbstractArray{mk_float,2},
             else
                 # get data for interpolation
                 vpa_lpoly_data = vpa.lpoly_data[iel_vpa]
+                vpa_igrid_full = @view vpa.igrid_full[:,iel_vpa]
                 # do the interpolation
-                pdf_out[ivpa,ivperp] = 0.0
-                for ivperpgrid in 1:vperp.ngrid
-                   # index for referencing pdf_in on orginal grid
-                   ivperpp = vperp.igrid_full[ivperpgrid,iel_vperp]
-                   igrid_vperp_lpoly_data = vperp_lpoly_data.lpoly_data[ivperpgrid]
-                   # interpolating polynomial value at ivperpp for interpolation
-                   vperppoly = lagrange_poly(igrid_vperp_lpoly_data,vperp_val)
-                   for ivpagrid in 1:vpa.ngrid
-                       # index for referencing pdf_in on orginal grid
-                       ivpap = vpa.igrid_full[ivpagrid,iel_vpa]
-                       igrid_vpa_lpoly_data = vpa_lpoly_data.lpoly_data[ivpagrid]
-                       # interpolating polynomial value at ivpap for interpolation
-                       vpapoly = lagrange_poly(igrid_vpa_lpoly_data,vpa_val)
-                       pdf_out[ivpa,ivperp] += vpapoly*vperppoly*pdf_in[ivpap,ivperpp]
-                   end
-                end
+                pdf_out[ivpa,ivperp] = interpolate_2D(vpa_lpoly_data,vpa_igrid_full,vpa.ngrid,vpa_val,
+                                        vperp_lpoly_data,vperp_igrid_full,vperp.ngrid,vperp_val,pdf_in)
+                # pdf_out[ivpa,ivperp] = 0.0
+                # for ivperpgrid in 1:vperp.ngrid
+                #    # index for referencing pdf_in on orginal grid
+                #    ivperpp = vperp.igrid_full[ivperpgrid,iel_vperp]
+                #    igrid_vperp_lpoly_data = vperp_lpoly_data.lpoly_data[ivperpgrid]
+                #    # interpolating polynomial value at ivperpp for interpolation
+                #    vperppoly = lagrange_poly(igrid_vperp_lpoly_data,vperp_val)
+                #    for ivpagrid in 1:vpa.ngrid
+                #        # index for referencing pdf_in on orginal grid
+                #        ivpap = vpa.igrid_full[ivpagrid,iel_vpa]
+                #        igrid_vpa_lpoly_data = vpa_lpoly_data.lpoly_data[ivpagrid]
+                #        # interpolating polynomial value at ivpap for interpolation
+                #        vpapoly = lagrange_poly(igrid_vpa_lpoly_data,vpa_val)
+                #        pdf_out[ivpa,ivperp] += vpapoly*vperppoly*pdf_in[ivpap,ivperpp]
+                #    end
+                # end
             end
         end
     end
     return nothing
+end
+
+function interpolate_2D(vpa_lpoly_data::lagrange_poly_data,vpa_igrid_full::AbstractArray{mk_int,1},vpa_ngrid::mk_int,vpa_val::mk_float,
+            vperp_lpoly_data::lagrange_poly_data,vperp_igrid_full::AbstractArray{mk_int,1},vperp_ngrid::mk_int,vperp_val::mk_float,
+            pdf_in::AbstractArray{mk_float,2})
+    result = 0.0
+    for ivperpgrid in 1:vperp_ngrid
+        # index for referencing pdf_in on orginal grid
+        ivperpp = vperp_igrid_full[ivperpgrid]
+        igrid_vperp_lpoly_data = vperp_lpoly_data.lpoly_data[ivperpgrid]
+        # interpolating polynomial value at ivperpp for interpolation
+        vperppoly = lagrange_poly(igrid_vperp_lpoly_data,vperp_val)
+        for ivpagrid in 1:vpa_ngrid
+            # index for referencing pdf_in on orginal grid
+            ivpap = vpa_igrid_full[ivpagrid]
+            igrid_vpa_lpoly_data = vpa_lpoly_data.lpoly_data[ivpagrid]
+            # interpolating polynomial value at ivpap for interpolation
+            vpapoly = lagrange_poly(igrid_vpa_lpoly_data,vpa_val)
+            result += vpapoly*vperppoly*pdf_in[ivpap,ivperpp]
+        end
+    end
+    return result
 end
 
 """
@@ -3878,21 +3904,65 @@ function convert_rosenbluth_potentials_to_primed_grid!(
     ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
     ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
     ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    # get the moments of F used for the multipole expansion on the unprimed (source species) grid
+    expansion_data = rosenbluth_potentials.multipole_expansion_moments
     # use interpolation and extrapolation from the multipole expansion
+    rosenbluth_potential_to_primed_grid!(GLabel(), rosenbluth_potentials_primed_grid.GG,
+        rosenbluth_potentials.GG, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    return nothing
+end
+
+function vpa_s(vpa_sp::mk_float,c0refs::mk_float,u0refs::mk_float,
+            c0refsp::mk_float,u0refsp::mk_float)
+    return (c0refsp*vpa_sp + (u0refsp - u0refs))/c0refs
+end
+function vperp_s(vperp_sp::mk_float,c0refs::mk_float,c0refsp::mk_float)
+    return c0refsp*vperp_sp/c0refs
+end
+function rosenbluth_potential_to_primed_grid!(label::AbstractRosenbluthPotentialLabel,
+    rosenbluth_potential_primed_grid::AbstractArray{mk_float,2},
+    rosenbluth_potential::AbstractArray{mk_float,2}, expansion_data::Union{Vector{mk_float},delta_f_multipole_moments},
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate,
+    c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float,
+    ivperp_max_sp::mk_int,ivpa_min_sp::mk_int,ivpa_max_sp::mk_int)
+    # loop over the different regions of the grid
     for ivperp in 1:ivperp_max_sp
+        vperp_s_val = vperp_s(vperp.grid[ivperp],c0refs,c0refsp)
         for ivpa in 1:ivpa_min_sp-1
             # multipole
+            vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
+            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
+        # get vperp element for interpolation data
+        iel_vperp = ielement_loopup(vperp_s_val,vperp)
+        # get data for interpolation
+        vperp_lpoly_data = vperp.lpoly_data[iel_vperp]
+        vperp_igrid_full = @view vperp.igrid_full[:,iel_vperp]
         for ivpa in ivpa_min_sp:ivpa_max_sp
+            vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
+            # get vpa element for interpolation data
+            iel_vpa = ielement_loopup(vpa_s_val,vpa)
+            # get data for interpolation
+            vpa_lpoly_data = vpa.lpoly_data[iel_vpa]
+            vpa_igrid_full = @view vpa.igrid_full[:,iel_vpa]
             # interpolate
+            rosenbluth_potential_primed_grid[ivpa,ivperp] = interpolate_2D(vpa_lpoly_data,vpa_igrid_full,vpa.ngrid,vpa_s_val,
+                                        vperp_lpoly_data,vperp_igrid_full,vperp.ngrid,vperp_s_val,rosenbluth_potential)
         end
         for ivpa in ivpa_max_sp+1:vpa.n
             # multipole
+            vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
+            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
     end
     for ivperp in ivperp_max_sp+1:vperp.n
+        vperp_s_val = vperp_s(vperp.grid[ivperp],c0refs,c0refsp)
         for ivpa in 1:vpa.n
             # multipole
+            vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
+            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
     end
     return nothing
