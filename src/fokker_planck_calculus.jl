@@ -3901,10 +3901,12 @@ function convert_rosenbluth_potentials_to_primed_grid!(
     # maximum and minimum values of vpa on s' grid that can be interpolated
     vpa_max_sp = (c0refs/c0refsp)*vpa.grid[end] + (u0refs - u0refsp)/c0refsp
     vpa_min_sp = (c0refs/c0refsp)*vpa.grid[1] + (u0refs - u0refsp)/c0refsp
-    ilims = [vperp.n, 1, vpa.n]
     ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
     ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
     ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    println("ivperp_max_sp=$ivperp_max_sp")
+    println("ivpa_max_sp=$ivpa_max_sp")
+    println("ivpa_min_sp=$ivpa_min_sp")
     # get the moments of F used for the multipole expansion on the unprimed (source species) grid
     expansion_data = rosenbluth_potentials.multipole_expansion_moments
     # use interpolation and extrapolation from the multipole expansion
@@ -4010,6 +4012,14 @@ Function to find the nearest index corresponding to a coordinate value
 """
 function igrid_lookup(v::mk_float, coord::finite_element_coordinate, ilim_default::mk_int, p::mk_int)
     zero = 1.0e-14
+    if v < coord.grid[1]
+        # v lower than lowest grid point
+        return p
+    end
+    if v > coord.grid[coord.n]
+        # v larger than largest grid point
+        return coord.n + p
+    end
     ilim = ilim_default
     for i in 1:coord.n-1
         x1 = v - coord.grid[i]
