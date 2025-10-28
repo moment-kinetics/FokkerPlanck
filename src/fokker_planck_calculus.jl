@@ -3893,7 +3893,8 @@ function convert_rosenbluth_potentials_to_primed_grid!(
             rosenbluth_potentials_primed_grid::rosenbluth_potential_data,
             rosenbluth_potentials::rosenbluth_potential_data,
             vpa::finite_element_coordinate, vperp::finite_element_coordinate,
-            c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float)
+            c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float;
+            calculate_GG=false,calculate_dGdvperp=false)
     # get index limits on primed species vpa, vperp grids for interpolation
     # maximum value of vperp on s' grid that can be interpolated
     vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
@@ -3907,8 +3908,40 @@ function convert_rosenbluth_potentials_to_primed_grid!(
     # get the moments of F used for the multipole expansion on the unprimed (source species) grid
     expansion_data = rosenbluth_potentials.multipole_expansion_moments
     # use interpolation and extrapolation from the multipole expansion
-    rosenbluth_potential_to_primed_grid!(GLabel(), rosenbluth_potentials_primed_grid.GG,
-        rosenbluth_potentials.GG, expansion_data,
+    if calculate_GG
+        rosenbluth_potential_to_primed_grid!(GLabel(), rosenbluth_potentials_primed_grid.GG,
+            rosenbluth_potentials.GG, expansion_data,
+            vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+            ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    end
+    if calculate_dGdvperp
+        rosenbluth_potential_to_primed_grid!(dGdvperpLabel(), rosenbluth_potentials_primed_grid.dGdvperp,
+            rosenbluth_potentials.dGdvperp, expansion_data,
+            vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+            ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    end
+    rosenbluth_potential_to_primed_grid!(HLabel(), rosenbluth_potentials_primed_grid.HH,
+        rosenbluth_potentials.HH, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    rosenbluth_potential_to_primed_grid!(dHdvpaLabel(), rosenbluth_potentials_primed_grid.dHdvpa,
+        rosenbluth_potentials.dHdvpa, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    rosenbluth_potential_to_primed_grid!(dHdvperpLabel(), rosenbluth_potentials_primed_grid.dHdvperp,
+        rosenbluth_potentials.dHdvperp, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    rosenbluth_potential_to_primed_grid!(d2Gdvperp2Label(), rosenbluth_potentials_primed_grid.d2Gdvperp2,
+        rosenbluth_potentials.d2Gdvperp2, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    rosenbluth_potential_to_primed_grid!(d2GdvperpdvpaLabel(), rosenbluth_potentials_primed_grid.d2Gdvperpdvpa,
+        rosenbluth_potentials.d2Gdvperpdvpa, expansion_data,
+        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    rosenbluth_potential_to_primed_grid!(d2Gdvpa2Label(), rosenbluth_potentials_primed_grid.d2Gdvpa2,
+        rosenbluth_potentials.d2Gdvpa2, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
     return nothing

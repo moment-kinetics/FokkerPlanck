@@ -540,13 +540,15 @@ end
 function test_interpolate_2D_vspace_new(; ngrid=9,
                                 nelement_vpa=16,
                                 nelement_vperp = 8,
-                                rtol = 1.0e-14,
+                                Lvpa=12.0, Lvperp=6.0,
+                                rtol = 0.0,
+                                atol = 1.0e-14,
                                 boundary_data_option=multipole_expansion::boundary_data_type)
     ngrid = 9
     nelement_vpa = 16
     nelement_vperp = 8
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                Lvpa=8.0,Lvperp=4.0)
+                                Lvpa=Lvpa,Lvperp=Lvperp)
     electron_mass = 1.0/1836.0
     thermal_temperature = 1.0
     mass = [electron_mass,1.0]
@@ -591,17 +593,57 @@ function test_interpolate_2D_vspace_new(; ngrid=9,
                 rosenbluth_potentials_s_converted_exact,density_in,upar_in,vth_in,vpa,vperp)
             # make normalisation prefactor still units of species s
             @. rosenbluth_potentials_s_converted_exact.GG *= (n0ref[isp]*c0ref[isp])/(n0ref[is]*c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.dGdvperp *= (n0ref[isp]/n0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvperp2 *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvpa2 *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
             @. rosenbluth_potentials_s_converted_exact.HH *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
-            # get the results on the s' grid
-            @. rosenbluth_potentials_s_converted_numerical.GG = 0.0
-            # other potentials tbd
+            @. rosenbluth_potentials_s_converted_exact.dHdvpa *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
+            @. rosenbluth_potentials_s_converted_exact.dHdvperp *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
+            # do the grid interpolation/extrapolation
             convert_rosenbluth_potentials_to_primed_grid!(rosenbluth_potentials_s_converted_numerical,
                 rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
-                species.c0ref[isp], species.u0ref[isp])
+                species.c0ref[isp], species.u0ref[isp],calculate_GG=true,calculate_dGdvperp=true)
+            # test G
             @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.GG - rosenbluth_potentials_s_converted_exact.GG)
             max_G_err = maximum(vpavperp_err)
-            max_G = maximum(rosenbluth_potentials_s_converted_exact.GG)
-            @test max_G_err < rtol * max_G
+            max_G = maximum(abs.(rosenbluth_potentials_s_converted_exact.GG))
+            @test max_G_err < rtol * max_G + atol
+            # test dGdvperp
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dGdvperp - rosenbluth_potentials_s_converted_exact.dGdvperp)
+            max_dGdvperp_err = maximum(vpavperp_err)
+            max_dGdvperp = maximum(abs.(rosenbluth_potentials_s_converted_exact.dGdvperp))
+            @test max_dGdvperp_err < rtol * max_dGdvperp + atol
+            # test d2Gdvperp2
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvperp2 - rosenbluth_potentials_s_converted_exact.d2Gdvperp2)
+            max_d2Gdvperp2_err = maximum(vpavperp_err)
+            max_d2Gdvperp2 = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvperp2))
+            @test max_d2Gdvperp2_err < rtol * max_d2Gdvperp2 + atol
+            # test d2Gdvperpdvpa
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvperpdvpa - rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa)
+            max_d2Gdvperpdvpa_err = maximum(vpavperp_err)
+            max_d2Gdvperpdvpa = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa))
+            @test max_d2Gdvperpdvpa_err < rtol * max_d2Gdvperpdvpa + atol
+            # test d2Gdvpa2
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvpa2 - rosenbluth_potentials_s_converted_exact.d2Gdvpa2)
+            max_d2Gdvpa2_err = maximum(vpavperp_err)
+            max_d2Gdvpa2 = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvpa2))
+            @test max_d2Gdvpa2_err < rtol * max_d2Gdvpa2 + atol
+            # test H
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.HH - rosenbluth_potentials_s_converted_exact.HH)
+            max_H_err = maximum(vpavperp_err)
+            max_H = maximum(abs.(rosenbluth_potentials_s_converted_exact.HH))
+            @test max_H_err < rtol * max_H + atol
+            # test dHdvpa
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dHdvpa - rosenbluth_potentials_s_converted_exact.dHdvpa)
+            max_dHdvpa_err = maximum(vpavperp_err)
+            max_dHdvpa = maximum(abs.(rosenbluth_potentials_s_converted_exact.dHdvpa))
+            @test max_dHdvpa_err < rtol * max_dHdvpa + atol
+            # test dHdvperp
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dHdvperp - rosenbluth_potentials_s_converted_exact.dHdvperp)
+            max_dHdvperp_err = maximum(vpavperp_err)
+            max_dHdvperp = maximum(abs.(rosenbluth_potentials_s_converted_exact.dHdvperp))
+            @test max_dHdvperp_err < rtol * max_dHdvperp + atol
         end
     end
     return nothing
