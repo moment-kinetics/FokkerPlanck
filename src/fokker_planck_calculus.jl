@@ -33,7 +33,7 @@ export fixed_background_plasma_input,
     slowing_down_source_data_input,
     slowing_down_source!, slowing_down_sink!,
     add_slowing_down_source!
-export convert_rosenbluth_potentials_from_source_to_other_grid!
+export convert_rosenbluth_potentials_from_source_to_other_grid!, delta_f_multipole_moments
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
