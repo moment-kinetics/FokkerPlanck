@@ -720,7 +720,7 @@ struct rosenbluth_potential_data
     d2Gdvpa2::Array{mk_float,2}
     d2Gdvperpdvpa::Array{mk_float,2}
     # the moments required to reconstuct the multipole expansion
-    multipole_expansion_moments::Union{delta_f_multipole_moments,Vector{mk_float}}
+    multipole_expansion_moments::Union{delta_f_multipole_moments,Vector{mk_float},Nothing}
     function rosenbluth_potential_data(vpa::finite_element_coordinate,
                                 vperp::finite_element_coordinate,
                                 boundary_data_option::boundary_data_type)
@@ -736,8 +736,11 @@ struct rosenbluth_potential_data
         Maxwellian_moments = allocate_float(3)
         if boundary_data_option == delta_f_multipole
             multipole_expansion_moments = delta_f_multipole_moments(Inm_vec,Maxwellian_moments)
-        else
+        elseif boundary_data_option == multipole_expansion
             multipole_expansion_moments = Inm_vec
+        else # option to ensure that `boundary_data_option == direct_integration`
+             # can be distinguished from the other options at compile time
+            multipole_expansion_moments = nothing
         end
         return new(GG, HH, dHdvpa, dHdvperp, dGdvperp, d2Gdvperp2, d2Gdvpa2, d2Gdvperpdvpa,
                     multipole_expansion_moments)
@@ -3563,7 +3566,13 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data,dens,upar,vth)
     return nothing
 end
-function calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data::delta_f_multipole_moments,dens,upar,vth)
+function calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data::Nothing,
+            dens::mk_float,upar::mk_float,vth::mk_float)
+    # do nothing, we do not use multipole expansion for direct_integration option.
+    return nothing
+end
+function calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data::delta_f_multipole_moments,
+            dens::mk_float,upar::mk_float,vth::mk_float)
     expansion_data.Maxwellian_moments .= [dens,upar,vth]
     # set Inm to zero because moments of F captured in Maxwellian moments and the
     # Rosenbluth potential formulae for Maxwellian distributions
