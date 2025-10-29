@@ -29,7 +29,7 @@ using FokkerPlanck.fokker_planck_calculus: interpolate_2D_vspace!, calculate_tes
 using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, fokkerplanck_weakform_arrays_struct,
                                             fokkerplanck_arrays_direct_integration_struct, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
                                             convert_rosenbluth_potentials_from_source_to_other_grid!, rosenbluth_potential_data,
-                                            calculate_analytical_Maxwellian_multipole_expansion_moments!
+                                            calculate_analytical_Maxwellian_multipole_expansion_moments!, delta_f_multipole_moments
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=12.0,Lvperp=6.0,bc_vpa=zero_boundary_condition,bc_vperp=zero_boundary_condition)
@@ -1002,10 +1002,13 @@ function rosenbluth_potential_solver_test(;
                                                                     dens,upar,vth)
             Inm_vec .= fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments
         elseif boundary_data_option == delta_f_multipole
-            Inm_vec_exact .= 0.0
+            expansion_data_exact = delta_f_multipole_moments(Inm_vec_exact,[0.0,0.0,0.0])
+            calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data_exact,
+                                                                    dens,upar,vth)
+            Inm_vec_exact = expansion_data_exact.Inm_vec
             Inm_vec .= fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments.Inm_vec
             @test isapprox(fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments.Maxwellian_moments,
-                            [dens,upar,vth],atol=1.0e-9)
+                            expansion_data_exact.Maxwellian_moments,atol=1.0e-9)
         end
         @. Inm_vec_err = abs(Inm_vec - Inm_vec_exact)
         #println(Inm_vec_exact)
