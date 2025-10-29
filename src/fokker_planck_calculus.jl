@@ -3905,9 +3905,9 @@ function convert_rosenbluth_potentials_to_primed_grid!(
     ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
     ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
     ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
-    println("ivperp_max_sp=$ivperp_max_sp")
-    println("ivpa_max_sp=$ivpa_max_sp")
-    println("ivpa_min_sp=$ivpa_min_sp")
+    # println("ivperp_max_sp=$ivperp_max_sp")
+    # println("ivpa_max_sp=$ivpa_max_sp")
+    # println("ivpa_min_sp=$ivpa_min_sp")
     # get the moments of F used for the multipole expansion on the unprimed (source species) grid
     expansion_data = rosenbluth_potentials.multipole_expansion_moments
     # use interpolation and extrapolation from the multipole expansion
