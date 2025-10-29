@@ -3565,8 +3565,9 @@ function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
 end
 function calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data::delta_f_multipole_moments,dens,upar,vth)
     expansion_data.Maxwellian_moments .= [dens,upar,vth]
-    calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data.Inm_vec,
-            dens,upar,vth)
+    # set Inm to zero because moments of F captured in Maxwellian moments and the
+    # Rosenbluth potential formulae for Maxwellian distributions
+    expansion_data.Inm_vec .= 0.0
     return nothing
 end
 function calculate_analytical_Maxwellian_multipole_expansion_moments!(Inm_vec::Vector{mk_float},
