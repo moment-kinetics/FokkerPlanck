@@ -33,7 +33,7 @@ export fixed_background_plasma_input,
     slowing_down_source_data_input,
     slowing_down_source!, slowing_down_sink!,
     add_slowing_down_source!
-export convert_rosenbluth_potentials_to_primed_grid!
+export convert_rosenbluth_potentials_from_source_to_other_grid!
 
 using ..type_definitions: mk_float, mk_int
 using ..array_allocation: allocate_float
@@ -3889,13 +3889,29 @@ function interpolate_2D(vpa_lpoly_data::lagrange_poly_data,vpa_igrid_full::Abstr
 end
 
 """
+Takes a set of Rosenbluth potentials on the grid
+where they are sourced (here, species s), and
+interpolates them where possible onto the "other" grid
+where they are to be used (here species s'= sp).
+Where interpolation is not possible, we extrapolate
+using the multipole expansion. This method is
+consistent with the numerical approximations made by
+`calculate_rosenbluth_potentials_via_elliptic_solve!()`
+when `boundary_data_option` is either `delta_f_multipole` or
+`multipole_expansion`.
 """
-function convert_rosenbluth_potentials_to_primed_grid!(
-            rosenbluth_potentials_primed_grid::rosenbluth_potential_data,
-            rosenbluth_potentials::rosenbluth_potential_data,
+function convert_rosenbluth_potentials_from_source_to_other_grid!(
+            rosenbluth_potentials_other_grid::rosenbluth_potential_data,
+            rosenbluth_potentials_source_grid::rosenbluth_potential_data,
             vpa::finite_element_coordinate, vperp::finite_element_coordinate,
-            c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float;
+            c0ref_source::mk_float, u0ref_source::mk_float,
+            c0ref_other::mk_float, u0ref_other::mk_float;
             calculate_GG=false,calculate_dGdvperp=false)
+    # denote source grid with s, other grid with s' = sp
+    c0refs = c0ref_source
+    u0refs = u0ref_source
+    c0refsp = c0ref_other
+    u0refsp = u0ref_other
     # get index limits on primed species vpa, vperp grids for interpolation
     # maximum value of vperp on s' grid that can be interpolated
     vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
@@ -3909,42 +3925,42 @@ function convert_rosenbluth_potentials_to_primed_grid!(
     # println("ivpa_max_sp=$ivpa_max_sp")
     # println("ivpa_min_sp=$ivpa_min_sp")
     # get the moments of F used for the multipole expansion on the unprimed (source species) grid
-    expansion_data = rosenbluth_potentials.multipole_expansion_moments
+    expansion_data = rosenbluth_potentials_source_grid.multipole_expansion_moments
     # use interpolation and extrapolation from the multipole expansion
     if calculate_GG
-        rosenbluth_potential_to_primed_grid!(GLabel(), rosenbluth_potentials_primed_grid.GG,
-            rosenbluth_potentials.GG, expansion_data,
+        rosenbluth_potential_to_other_grid!(GLabel(), rosenbluth_potentials_other_grid.GG,
+            rosenbluth_potentials_source_grid.GG, expansion_data,
             vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
             ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
     end
     if calculate_dGdvperp
-        rosenbluth_potential_to_primed_grid!(dGdvperpLabel(), rosenbluth_potentials_primed_grid.dGdvperp,
-            rosenbluth_potentials.dGdvperp, expansion_data,
+        rosenbluth_potential_to_other_grid!(dGdvperpLabel(), rosenbluth_potentials_other_grid.dGdvperp,
+            rosenbluth_potentials_source_grid.dGdvperp, expansion_data,
             vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
             ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
     end
-    rosenbluth_potential_to_primed_grid!(HLabel(), rosenbluth_potentials_primed_grid.HH,
-        rosenbluth_potentials.HH, expansion_data,
+    rosenbluth_potential_to_other_grid!(HLabel(), rosenbluth_potentials_other_grid.HH,
+        rosenbluth_potentials_source_grid.HH, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
-    rosenbluth_potential_to_primed_grid!(dHdvpaLabel(), rosenbluth_potentials_primed_grid.dHdvpa,
-        rosenbluth_potentials.dHdvpa, expansion_data,
+    rosenbluth_potential_to_other_grid!(dHdvpaLabel(), rosenbluth_potentials_other_grid.dHdvpa,
+        rosenbluth_potentials_source_grid.dHdvpa, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
-    rosenbluth_potential_to_primed_grid!(dHdvperpLabel(), rosenbluth_potentials_primed_grid.dHdvperp,
-        rosenbluth_potentials.dHdvperp, expansion_data,
+    rosenbluth_potential_to_other_grid!(dHdvperpLabel(), rosenbluth_potentials_other_grid.dHdvperp,
+        rosenbluth_potentials_source_grid.dHdvperp, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
-    rosenbluth_potential_to_primed_grid!(d2Gdvperp2Label(), rosenbluth_potentials_primed_grid.d2Gdvperp2,
-        rosenbluth_potentials.d2Gdvperp2, expansion_data,
+    rosenbluth_potential_to_other_grid!(d2Gdvperp2Label(), rosenbluth_potentials_other_grid.d2Gdvperp2,
+        rosenbluth_potentials_source_grid.d2Gdvperp2, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
-    rosenbluth_potential_to_primed_grid!(d2GdvperpdvpaLabel(), rosenbluth_potentials_primed_grid.d2Gdvperpdvpa,
-        rosenbluth_potentials.d2Gdvperpdvpa, expansion_data,
+    rosenbluth_potential_to_other_grid!(d2GdvperpdvpaLabel(), rosenbluth_potentials_other_grid.d2Gdvperpdvpa,
+        rosenbluth_potentials_source_grid.d2Gdvperpdvpa, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
-    rosenbluth_potential_to_primed_grid!(d2Gdvpa2Label(), rosenbluth_potentials_primed_grid.d2Gdvpa2,
-        rosenbluth_potentials.d2Gdvpa2, expansion_data,
+    rosenbluth_potential_to_other_grid!(d2Gdvpa2Label(), rosenbluth_potentials_other_grid.d2Gdvpa2,
+        rosenbluth_potentials_source_grid.d2Gdvpa2, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
         ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
     return nothing
@@ -3957,48 +3973,56 @@ end
 function vperp_s(vperp_sp::mk_float,c0refs::mk_float,c0refsp::mk_float)
     return c0refsp*vperp_sp/c0refs
 end
-function rosenbluth_potential_to_primed_grid!(label::AbstractRosenbluthPotentialLabel,
-    rosenbluth_potential_primed_grid::AbstractArray{mk_float,2},
-    rosenbluth_potential::AbstractArray{mk_float,2}, expansion_data::Union{Vector{mk_float},delta_f_multipole_moments},
+function rosenbluth_potential_to_other_grid!(label::AbstractRosenbluthPotentialLabel,
+    rosenbluth_potential_other_grid::AbstractArray{mk_float,2},
+    rosenbluth_potential_source_grid::AbstractArray{mk_float,2},
+    expansion_data::Union{Vector{mk_float},delta_f_multipole_moments},
     vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-    c0refs::mk_float, u0refs::mk_float, c0refsp::mk_float, u0refsp::mk_float,
-    ivperp_max_sp::mk_int,ivpa_min_sp::mk_int,ivpa_max_sp::mk_int)
-    # loop over the different regions of the grid
-    for ivperp in 1:ivperp_max_sp
+    c0ref_source::mk_float, u0ref_source::mk_float,
+    c0ref_other::mk_float, u0ref_other::mk_float,
+    # max and min indices to interpolate, on the other (s') grid
+    ivperp_max::mk_int,ivpa_min::mk_int,ivpa_max::mk_int)
+    # denote source grid with s, other grid with s' = sp
+    c0refs = c0ref_source
+    u0refs = u0ref_source
+    c0refsp = c0ref_other
+    u0refsp = u0ref_other
+    # loop over the different regions of the s' grid
+    for ivperp in 1:ivperp_max
         vperp_s_val = vperp_s(vperp.grid[ivperp],c0refs,c0refsp)
-        for ivpa in 1:ivpa_min_sp-1
-            # multipole
+        for ivpa in 1:ivpa_min-1
+            # multipole expand below the minimum ivpa in the s' grid
             vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
-            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
+            rosenbluth_potential_other_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
         # get vperp element for interpolation data
         iel_vperp = ielement_loopup(vperp_s_val,vperp)
         # get data for interpolation
         vperp_lpoly_data = vperp.lpoly_data[iel_vperp]
         vperp_igrid_full = @view vperp.igrid_full[:,iel_vperp]
-        for ivpa in ivpa_min_sp:ivpa_max_sp
+        for ivpa in ivpa_min:ivpa_max
             vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
             # get vpa element for interpolation data
             iel_vpa = ielement_loopup(vpa_s_val,vpa)
             # get data for interpolation
             vpa_lpoly_data = vpa.lpoly_data[iel_vpa]
             vpa_igrid_full = @view vpa.igrid_full[:,iel_vpa]
-            # interpolate
-            rosenbluth_potential_primed_grid[ivpa,ivperp] = interpolate_2D(vpa_lpoly_data,vpa_igrid_full,vpa.ngrid,vpa_s_val,
-                                        vperp_lpoly_data,vperp_igrid_full,vperp.ngrid,vperp_s_val,rosenbluth_potential)
+            # interpolate between ivpa min and max in s' grid
+            rosenbluth_potential_other_grid[ivpa,ivperp] = interpolate_2D(vpa_lpoly_data,vpa_igrid_full,vpa.ngrid,vpa_s_val,
+                                        vperp_lpoly_data,vperp_igrid_full,vperp.ngrid,vperp_s_val,rosenbluth_potential_source_grid)
         end
-        for ivpa in ivpa_max_sp+1:vpa.n
-            # multipole
+        for ivpa in ivpa_max+1:vpa.n
+            # multipole expand above the maximum ivpa in the s' grid
             vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
-            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
+            rosenbluth_potential_other_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
     end
-    for ivperp in ivperp_max_sp+1:vperp.n
+    for ivperp in ivperp_max+1:vperp.n
         vperp_s_val = vperp_s(vperp.grid[ivperp],c0refs,c0refsp)
         for ivpa in 1:vpa.n
-            # multipole
+            # multipole expand everywhere above the maximum ivperp in the s' grid
             vpa_s_val = vpa_s(vpa.grid[ivpa],c0refs,u0refs,c0refsp,u0refsp)
-            rosenbluth_potential_primed_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
+            rosenbluth_potential_other_grid[ivpa,ivperp] = multipole_series(label,vpa_s_val,vperp_s_val,expansion_data)
         end
     end
     return nothing

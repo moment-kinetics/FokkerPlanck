@@ -28,7 +28,7 @@ using FokkerPlanck.fokker_planck_calculus: enforce_vpavperp_BCs!, calculate_rose
 using FokkerPlanck.fokker_planck_calculus: interpolate_2D_vspace!, calculate_test_particle_preconditioner!
 using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, fokkerplanck_weakform_arrays_struct,
                                             fokkerplanck_arrays_direct_integration_struct, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
-                                            convert_rosenbluth_potentials_to_primed_grid!, rosenbluth_potential_data,
+                                            convert_rosenbluth_potentials_from_source_to_other_grid!, rosenbluth_potential_data,
                                             calculate_analytical_Maxwellian_multipole_expansion_moments!
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
@@ -598,7 +598,7 @@ function test_rosenbluth_potential_grid_conversion(; ngrid=9,
             @. rosenbluth_potentials_s_converted_exact.dHdvpa *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
             @. rosenbluth_potentials_s_converted_exact.dHdvperp *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
             # do the grid interpolation/extrapolation
-            convert_rosenbluth_potentials_to_primed_grid!(rosenbluth_potentials_s_converted_numerical,
+            convert_rosenbluth_potentials_from_source_to_other_grid!(rosenbluth_potentials_s_converted_numerical,
                 rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
                 species.c0ref[isp], species.u0ref[isp],calculate_GG=true,calculate_dGdvperp=true)
             # test G
