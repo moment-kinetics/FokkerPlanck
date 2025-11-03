@@ -792,6 +792,154 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
     return nothing
 end
 
+function multi_species_multi_reference_fokker_planck_collisions_test(;
+                ngrid=17, nelement_vpa=8, nelement_vperp=4,
+                # set small absolute values for test tolerances
+                atol_max = 1.0e-5,
+                atol_L2 = 1.0e-7,
+                print_to_screen=false
+                )
+    nuref = 1.0
+    #test_numerical_conserving_terms = false
+    test_Maxwellian_Rosenbluth_coefficients = false
+    density = [1.0, 1.0, 1.0]
+    upar = [1.0, -0.7, 0.2]
+    vth = [1.0,1.0,1.0]
+    mass2species = [0.5,1.0]
+    zeds2species = [2.0,1.0]
+    c0ref2species = [1.0,1.0]
+    u0ref2species = [0.0,0.0]
+    n0ref2species = [1.0,1.0]
+    @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
+            (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
+                                                )
+        vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+            Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
+        println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)")
+        @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
+            (test_numerical_conserving_terms,) in (false,)
+            println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
+            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                                            multi_species_operator_option=multi_species_operator_option,
+                                                            print_to_screen=print_to_screen)
+            # arrays for the test
+            F_M = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_num = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_err = allocate_float(vpa.n,vperp.n)
+            dummy_array = allocate_float(vpa.n,vperp.n)
+            mass = species.mass
+            zed = species.zeds
+            c0ref = species.c0ref
+            u0ref = species.u0ref
+            n0ref = species.n0ref
+            @. C_M_exact = 0.0
+            nfac = 0.3
+            ufac = 0.7
+            # specify a pdf that has a nonzero qpar~ 0.1 pressure by summing Maxwellian distributions
+            # F_s = F_sA + nfac * F_sB
+            for is in 1:species.n
+                prefactor = (c0ref[is]^3)/n0ref[is]
+                for ivperp in 1:vperp.n
+                    vperp_s = c0ref[is]*vperp.grid[ivperp]
+                    for ivpa in 1:vpa.n
+                        vpa_s = c0ref[is]*vpa.grid[ivpa] + u0ref[is]
+                        F_M[ivpa,ivperp,is] = prefactor*(F_Maxwellian(density[is],upar[is],vth[is],vpa_s,vperp_s) +
+                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa_s,vperp_s))
+                    end
+                end
+                # assess how far from Maxwellian F_M is
+                if print_to_screen
+                    @views density_M = get_density(F_M[:,:,is], vpa, vperp)
+                    @views upar_M = get_upar(F_M[:,:,is], vpa, vperp, density_M)
+                    @views pressure_M = get_pressure(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views ppar_M = get_ppar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views qpar_M = get_qpar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views rmom_M = get_rmom(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    println("density_M: $density_M")
+                    println("upar_M: $upar_M")
+                    println("pressure_M: $pressure_M")
+                    println("ppar_M: $ppar_M")
+                    println("qpar_M: $qpar_M")
+                    println("rmom_M: $rmom_M")
+                    println("qpar_M/ppar_M $(qpar_M/ppar_M)")
+                end
+            end
+            # sum up contributions to cross-collision operator
+            for is in 1:species.n
+                prefactor = (c0ref[is]^3)/n0ref[is]
+                for isp in 1:species.n
+                    for ivperp in 1:vperp.n
+                        vperp_s = c0ref[is]*vperp.grid[ivperp]
+                        for ivpa in 1:vpa.n
+                            vpa_s = c0ref[is]*vpa.grid[ivpa] + u0ref[is]
+                            # obtain an exact expression for the non-Maxwellian pdf
+                            # by using that the collision operator is bilinear, i.e.,
+                            # C[F_s,F_s'] =  C[F_sA,F_s'A]
+                            #                 + nfac * ( C[F_sA,F_s'B] + C[F_sB,F_s'A])
+                            #                 + nfac^2 * C[F_sB,F_s'B]
+                            C_M_exact[ivpa,ivperp,is] += prefactor*(Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                            density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            nfac*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                            density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            nfac*Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                            density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            (nfac^2)*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                            density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s))
+                        end
+                    end
+                end
+            end
+            fokker_planck_collision_operator_weak_form!(C_M_num,
+                    F_M, nuref, fkpl_arrays;
+                    use_conserving_corrections=test_numerical_conserving_terms,
+                    use_Maxwellian_Rosenbluth_coefficients=test_Maxwellian_Rosenbluth_coefficients)
+            # test relative values as C_M_exact /= 0 in general
+            rtol_max = atol_max
+            rtol_L2 = atol_L2
+            for is in 1:species.n
+                Cnorm = maximum(abs.(@view C_M_exact[:,:,is]))
+                @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M[$(is)]",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+                #println(Cnorm, " ", C_M_max, " ", C_M_L2)
+                @test C_M_max < atol_max + rtol_max*Cnorm
+                @test C_M_L2 < atol_L2 + rtol_L2*Cnorm
+            end
+            # test conservation properties
+            if test_numerical_conserving_terms
+                atol_n = 5.0e-12
+                atol_momentum = 3.0e-12
+                atol_energy = 3.0e-12
+            else
+                atol_n = 1.0e-11
+                atol_momentum = 1.0e-8
+                atol_energy = 1.0e-8
+            end
+            # compute changes in density induced by C_M_num
+            for is in 1:species.n
+                @views delta_n = get_density(C_M_num[:,:,is],vpa,vperp)
+                @test delta_n < atol_n
+            end
+            # compute change in total parallel momentum
+            delta_parallel_momentum = get_total_parallel_momentum(C_M_num,vpa,vperp,species)
+            @test delta_parallel_momentum < atol_momentum
+            # compute change in total energy
+            delta_energy = get_total_energy(C_M_num,vpa,vperp,species)
+            @test delta_energy < atol_energy
+            # check entropy production is positive for pdf far from Maxwellian
+            # n.b. dSdt may be negative and small if pdf is close to Maxwellian
+            dSdt = calculate_entropy_production(C_M_num,F_M,fkpl_arrays)
+            @test dSdt > 0.0
+        end
+    end
+    return nothing
+end
+
 function slowing_down_fokker_planck_collisions_test(;
     ngrid = 9,
     nelement_vpa = 16,
@@ -1382,6 +1530,18 @@ function runtests()
             atol_max = 1.0e-4
             atol_L2 = 1.0e-6
             multi_species_fokker_planck_collisions_test(ngrid=ngrid,
+                nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
+                atol_max = atol_max, atol_L2=atol_L2,
+                print_to_screen=print_to_screen)
+        end
+        @testset "weak-form (multi-species multi-reference-speed) collision operator calculation" begin
+            println("    - test weak-form (multi-species multi-reference-speed) collision operator calculation")
+            ngrid = 17
+            nelement_vpa = 4
+            nelement_vperp = 2
+            atol_max = 1.0e-4
+            atol_L2 = 1.0e-6
+            multi_species_multi_reference_fokker_planck_collisions_test(ngrid=ngrid,
                 nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
                 atol_max = atol_max, atol_L2=atol_L2,
                 print_to_screen=print_to_screen)
