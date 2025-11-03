@@ -3921,15 +3921,17 @@ function convert_rosenbluth_potentials_from_source_to_other_grid!(
     u0refs = u0ref_source
     c0refsp = c0ref_other
     u0refsp = u0ref_other
-    # get index limits on primed species vpa, vperp grids for interpolation
-    # maximum value of vperp on s' grid that can be interpolated
-    vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
-    # maximum and minimum values of vpa on s' grid that can be interpolated
-    vpa_max_sp = (c0refs/c0refsp)*vpa.grid[end] + (u0refs - u0refsp)/c0refsp
-    vpa_min_sp = (c0refs/c0refsp)*vpa.grid[1] + (u0refs - u0refsp)/c0refsp
-    ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
-    ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
-    ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    # # get index limits on primed species vpa, vperp grids for interpolation
+    # # maximum value of vperp on s' grid that can be interpolated
+    # vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
+    # # maximum and minimum values of vpa on s' grid that can be interpolated
+    # vpa_max_sp = (c0refs/c0refsp)*vpa.grid[end] + (u0refs - u0refsp)/c0refsp
+    # vpa_min_sp = (c0refs/c0refsp)*vpa.grid[1] + (u0refs - u0refsp)/c0refsp
+    # ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
+    # ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
+    # ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    ivperp_max_sp, ivpa_min_sp, ivpa_max_sp = vpa_vperp_interpolation_limits(c0refs,u0refs,
+                                                    c0refsp,u0refsp,vpa,vperp)
     # println("ivperp_max_sp=$ivperp_max_sp")
     # println("ivpa_max_sp=$ivpa_max_sp")
     # println("ivpa_min_sp=$ivpa_min_sp")
@@ -3975,6 +3977,22 @@ function convert_rosenbluth_potentials_from_source_to_other_grid!(
     return nothing
 end
 
+function vpa_vperp_interpolation_limits(
+            c0refs::mk_float, u0refs::mk_float,
+            c0refsp::mk_float, u0refsp::mk_float,
+            vpa::finite_element_coordinate,
+            vperp::finite_element_coordinate)
+    # get index limits on primed species vpa, vperp grids for interpolation
+    # maximum value of vperp on s' grid that can be interpolated
+    vperp_max_sp = (c0refs/c0refsp)*vperp.grid[end]
+    # maximum and minimum values of vpa on s' grid that can be interpolated
+    vpa_max_sp = (c0refs/c0refsp)*vpa.grid[end] + (u0refs - u0refsp)/c0refsp
+    vpa_min_sp = (c0refs/c0refsp)*vpa.grid[1] + (u0refs - u0refsp)/c0refsp
+    ivperp_max_sp = igrid_lookup(vperp_max_sp, vperp, vperp.n, 0)
+    ivpa_max_sp = igrid_lookup(vpa_max_sp, vpa, vpa.n, 0)
+    ivpa_min_sp = igrid_lookup(vpa_min_sp, vpa, 1, 1)
+    return ivperp_max_sp, ivpa_min_sp, ivpa_max_sp
+end
 function vpa_s(vpa_sp::mk_float,c0refs::mk_float,u0refs::mk_float,
             c0refsp::mk_float,u0refsp::mk_float)
     return (c0refsp*vpa_sp + (u0refsp - u0refs))/c0refs

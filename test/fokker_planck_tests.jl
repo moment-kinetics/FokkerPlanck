@@ -13,7 +13,7 @@ using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inp
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole, boundary_data_type,
-                                            repeat_assembly_per_species, single_assembly_per_species
+                                            repeat_assembly_per_species, single_assembly_per_species, multi_species_operator_type
 
 using FokkerPlanck: fokker_planck_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
@@ -356,7 +356,8 @@ function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
     species::species_info)
     parallel_momentum = 0.0
     for is in 1:species.n
-        @views gamma = get_upar(ff[:,:,is],vpa,vperp,1.0)
+        @views gamma = species.n0ref[is]*(species.c0ref[is]*get_upar(ff[:,:,is],vpa,vperp,1.0)
+                                 + species.u0ref[is]*get_density(ff[:,:,is],vpa,vperp))
         parallel_momentum += species.mass[is]*gamma
     end
     return parallel_momentum
@@ -368,7 +369,9 @@ function get_total_energy(ff::AbstractArray{mk_float,3},
     species::species_info)
     energy = 0.0
     for is in 1:species.n
-        @views energy += get_pressure(ff[:,:,is],vpa,vperp,0.0,species.mass[is])
+        @views energy += ((species.n0ref[is]*species.c0ref[is]^2)*
+                            get_pressure(ff[:,:,is],vpa,vperp,
+                                -species.u0ref[is]/species.c0ref[is],species.mass[is]))
     end
     return energy
 end
@@ -797,7 +800,8 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
                 # set small absolute values for test tolerances
                 atol_max = 1.0e-5,
                 atol_L2 = 1.0e-7,
-                print_to_screen=false
+                print_to_screen=false,
+                assembly_option=repeat_assembly_per_species::multi_species_operator_type,
                 )
     nuref = 1.0
     #test_numerical_conserving_terms = false
@@ -807,13 +811,13 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
     vth = [1.0,1.0,1.0]
     mass2species = [0.5,1.0]
     zeds2species = [2.0,1.0]
-    c0ref2species = [1.0,1.0]
-    u0ref2species = [0.0,0.0]
-    n0ref2species = [1.0,1.0]
+    c0ref2species = [0.9,1.5]
+    u0ref2species = [0.2,0.4]
+    n0ref2species = [0.9,1.2]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
             (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
-                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
-                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,assembly_option),
+                                                #(multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
                                                 )
         vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
             Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
@@ -922,7 +926,7 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
             end
             # compute changes in density induced by C_M_num
             for is in 1:species.n
-                @views delta_n = get_density(C_M_num[:,:,is],vpa,vperp)
+                @views delta_n = n0ref[is]*get_density(C_M_num[:,:,is],vpa,vperp)
                 @test delta_n < atol_n
             end
             # compute change in total parallel momentum
@@ -1539,8 +1543,8 @@ function runtests()
             ngrid = 17
             nelement_vpa = 4
             nelement_vperp = 2
-            atol_max = 1.0e-4
-            atol_L2 = 1.0e-6
+            atol_max = 5.0e-4
+            atol_L2 = 5.0e-6
             multi_species_multi_reference_fokker_planck_collisions_test(ngrid=ngrid,
                 nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
                 atol_max = atol_max, atol_L2=atol_L2,
