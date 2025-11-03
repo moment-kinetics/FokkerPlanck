@@ -4264,7 +4264,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         # collect the calculated moments
         for is in 1:species.n
             @views density[is] = n0ref[is]*get_density(pdf_in[:,:,is], vpa, vperp)
-            @views upar[is] = c0ref[is]*get_upar(pdf_in[:,:,is], vpa, vperp, density[is]) + u0ref[is]
+            @views upar[is] = c0ref[is]*get_upar(pdf_in[:,:,is], vpa, vperp, density[is]/n0ref[is]) + u0ref[is]
             @views pressure[is] = n0ref[is]*(c0ref[is]^2)*get_pressure(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
             @views ppar[is] = n0ref[is]*(c0ref[is]^2)*get_ppar(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
             @views qpar[is] = n0ref[is]*(c0ref[is]^3)*get_qpar(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
@@ -4319,8 +4319,8 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
                     wpar = vpa.grid[ivpa] - (upar[is] - u0ref[is])/c0ref[is]
                     for isp in 1:species.n
                         x0 = zcoeffs[1,isp,is]
-                        x1 = zcoeffs[2,isp,is]
-                        x2 = zcoeffs[3,isp,is]
+                        x1 = zcoeffs[2,isp,is]*c0ref[is]
+                        x2 = zcoeffs[3,isp,is]*c0ref[is]^2
                         CC[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_in[ivpa,ivperp,is]
                     end
                 end

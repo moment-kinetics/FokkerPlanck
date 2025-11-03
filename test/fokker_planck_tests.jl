@@ -796,7 +796,7 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
 end
 
 function multi_species_multi_reference_fokker_planck_collisions_test(;
-                ngrid=17, nelement_vpa=8, nelement_vperp=4,
+                ngrid=17, nelement_vpa=8, nelement_vperp=4, Lvpa=10.0, Lvperp=5.0,
                 # set small absolute values for test tolerances
                 atol_max = 1.0e-5,
                 atol_L2 = 1.0e-7,
@@ -808,11 +808,11 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
     test_Maxwellian_Rosenbluth_coefficients = false
     density = [1.0, 1.0, 1.0]
     upar = [1.0, -0.7, 0.2]
-    vth = [1.0,1.0,1.0]
+    vth = [2.0,1.0,1.0]
     mass2species = [0.5,1.0]
     zeds2species = [2.0,1.0]
-    c0ref2species = [1.0,1.0]
-    u0ref2species = [1.0,-0.7]
+    c0ref2species = [1.9,1.1]
+    u0ref2species = [1.1,-0.8]
     n0ref2species = [0.9,1.5]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
             (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
@@ -820,7 +820,7 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
                                                 #(multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
                                                 )
         vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-            Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
+            Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc,bc_vperp=bc)
         println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)")
         @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
             (test_numerical_conserving_terms,) in (false,true)
@@ -1540,9 +1540,9 @@ function runtests()
         end
         @testset "weak-form (multi-species multi-reference-speed) collision operator calculation" begin
             println("    - test weak-form (multi-species multi-reference-speed) collision operator calculation")
-            ngrid = 17
-            nelement_vpa = 4
-            nelement_vperp = 2
+            ngrid = 9
+            nelement_vpa = 16
+            nelement_vperp = 8
             atol_max = 5.0e-4
             atol_L2 = 5.0e-6
             multi_species_multi_reference_fokker_planck_collisions_test(ngrid=ngrid,

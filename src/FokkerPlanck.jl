@@ -200,7 +200,7 @@ function fokker_planck_collision_operator_weak_form!(
         # collect the calculated moments
         for is in 1:species.n
             @views density[is] = n0ref[is]*get_density(ff_in[:,:,is], vpa, vperp)
-            @views upar[is] = c0ref[is]*get_upar(ff_in[:,:,is], vpa, vperp, density[is]) + u0ref[is]
+            @views upar[is] = c0ref[is]*get_upar(ff_in[:,:,is], vpa, vperp, density[is]/n0ref[is]) + u0ref[is]
         end
         # get the rosenbluth potential buffer array
         rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
