@@ -4247,6 +4247,9 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         vperp = fkpl_arrays.vperp
         species = fkpl_arrays.species
         mass = species.mass
+        c0ref = species.c0ref
+        u0ref = species.u0ref
+        n0ref = species.n0ref
         # moments of collisions for each cross-species pair
         delta_n_sp_s = fkpl_arrays.delta_n_sp_s
         delta_m_sp_s = fkpl_arrays.delta_m_sp_s
@@ -4260,12 +4263,12 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         rmom = fkpl_arrays.rmom
         # collect the calculated moments
         for is in 1:species.n
-            @views density[is] = get_density(pdf_in[:,:,is], vpa, vperp)
-            @views upar[is] = get_upar(pdf_in[:,:,is], vpa, vperp, density[is])
-            @views pressure[is] = get_pressure(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views ppar[is] = get_ppar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views qpar[is] = get_qpar(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views rmom[is] = get_rmom(pdf_in[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views density[is] = n0ref[is]*get_density(pdf_in[:,:,is], vpa, vperp)
+            @views upar[is] = c0ref[is]*get_upar(pdf_in[:,:,is], vpa, vperp, density[is]) + u0ref[is]
+            @views pressure[is] = n0ref[is]*(c0ref[is]^2)*get_pressure(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
+            @views ppar[is] = n0ref[is]*(c0ref[is]^2)*get_ppar(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
+            @views qpar[is] = n0ref[is]*(c0ref[is]^3)*get_qpar(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
+            @views rmom[is] = n0ref[is]*(c0ref[is]^4)*get_rmom(pdf_in[:,:,is], vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
         end
         # correction coefficients
         zcoeffs = fkpl_arrays.correction_coeffs_z
@@ -4313,7 +4316,7 @@ function conserving_corrections!(CC::AbstractArray{mk_float,3},
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    wpar = vpa.grid[ivpa] - upar[is]
+                    wpar = vpa.grid[ivpa] - (upar[is] - u0ref[is])/c0ref[is]
                     for isp in 1:species.n
                         x0 = zcoeffs[1,isp,is]
                         x1 = zcoeffs[2,isp,is]

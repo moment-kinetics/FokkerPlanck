@@ -811,9 +811,9 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
     vth = [1.0,1.0,1.0]
     mass2species = [0.5,1.0]
     zeds2species = [2.0,1.0]
-    c0ref2species = [0.9,1.5]
-    u0ref2species = [0.2,0.4]
-    n0ref2species = [0.9,1.2]
+    c0ref2species = [1.0,1.0]
+    u0ref2species = [1.0,-0.7]
+    n0ref2species = [0.9,1.5]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
             (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
                                                 (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,assembly_option),
@@ -823,7 +823,7 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
             Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
         println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)")
         @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
-            (test_numerical_conserving_terms,) in (false,)
+            (test_numerical_conserving_terms,) in (false,true)
             println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
             fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                                             multi_species_operator_option=multi_species_operator_option,

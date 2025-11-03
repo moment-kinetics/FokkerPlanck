@@ -199,8 +199,8 @@ function fokker_planck_collision_operator_weak_form!(
         upar = fkpl_arrays.upar
         # collect the calculated moments
         for is in 1:species.n
-            @views density[is] = get_density(ff_in[:,:,is], vpa, vperp)
-            @views upar[is] = get_upar(ff_in[:,:,is], vpa, vperp, density[is])
+            @views density[is] = n0ref[is]*get_density(ff_in[:,:,is], vpa, vperp)
+            @views upar[is] = c0ref[is]*get_upar(ff_in[:,:,is], vpa, vperp, density[is]) + u0ref[is]
         end
         # get the rosenbluth potential buffer array
         rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
@@ -221,9 +221,9 @@ function fokker_planck_collision_operator_weak_form!(
                 # impose any non-natural boundary conditions
                 enforce_vpavperp_BCs!(Cssp,vpa,vperp)
                 # get moments
-                delta_n_sp_s[isp,is] = get_density(Cssp, vpa, vperp)
-                delta_m_sp_s[isp,is] = mass[is]*(get_upar(Cssp, vpa, vperp, 1.0) - upar[is]*delta_n_sp_s[isp,is])
-                delta_p_sp_s[isp,is] = get_pressure(Cssp, vpa, vperp, upar[is], mass[is])
+                delta_n_sp_s[isp,is] = n0ref[is]*get_density(Cssp, vpa, vperp)
+                delta_m_sp_s[isp,is] = mass[is]*(n0ref[is]*c0ref[is]*get_upar(Cssp, vpa, vperp, 1.0) - (upar[is] - u0ref[is])*delta_n_sp_s[isp,is])
+                delta_p_sp_s[isp,is] = n0ref[is]*(c0ref[is]^2)*get_pressure(Cssp, vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
                 # sum up the collision operator contributions
                 @. CCs[:,:,is] += Cssp
             end
