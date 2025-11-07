@@ -169,17 +169,19 @@ function fokker_planck_collision_operator_weak_form!(
         # only once per species to reduce cost, but still get the correction terms for each
         # species species' pair of collison operators using finite-element integrals
         # storage for summed potentials
-        rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
+        rosenbluth_potentials_total = fkpl_arrays.rosenbluth_potentials
+        rosenbluth_potentials_buffer = fkpl_arrays.rosenbluth_potentials_buffer
         fixed_background_plasma = fkpl_arrays.fixed_background_plasma
         # for each species, sum up the Rosenbluth potentials to make the appropriate
         # total Rosenbluth potential, and assemble the collision operator
         for is in 1:species.n
-            calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    rosenbluth_potentials_s,species,species.zeds[is],species.mass[is],
-                    fixed_background_plasma)
+            calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials_total,
+                    rosenbluth_potentials_buffer,rosenbluth_potentials_s,species,
+                    species.zeds[is],species.mass[is],species.c0ref[is],species.u0ref[is],
+                    vpa,vperp,fixed_background_plasma)
             # assemble weak form and solve mass matrix problem for CCssp
             @views fokker_planck_collision_operator_solve!(
-                         CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials, 1.0, 1.0, nuref,
+                         CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials_total, 1.0, 1.0, nuref,
                          rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
         end
     else
@@ -231,8 +233,9 @@ function fokker_planck_collision_operator_weak_form!(
             @views fokker_planck_cross_species_collision_operator!(
                         Cssp,
                         ff_in[:,:,is],
-                        nuref, mass[is], zeds[is],
+                        nuref, mass[is], zeds[is], c0ref[is], u0ref[is],
                         fkpl_arrays.rosenbluth_potentials,
+                        fkpl_arrays.rosenbluth_potentials_buffer,
                         fkpl_arrays.fixed_background_plasma,
                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
                         use_conserving_corrections=use_conserving_corrections)
@@ -252,14 +255,16 @@ Cross-species collisions due to fixed background plasma.
 function fokker_planck_cross_species_collision_operator!(
                         CC::AbstractArray{mk_float,2},
                         ff_in::AbstractArray{mk_float,2},
-                        nuref::mk_float, ms::mk_float, Zs::mk_float,
-                        rosenbluth_potentials,
+                        nuref::mk_float, ms::mk_float, Zs::mk_float, c0refs::mk_float, u0refs::mk_float,
+                        rosenbluth_potentials, rosenbluth_potentials_buffer,
                         fixed_background_plasma,
                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
                         use_conserving_corrections=true::Bool)
     # calculate the Rosenbluth potentials due to the background plasma
     calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    Zs,ms,fixed_background_plasma)
+                    rosenbluth_potentials_buffer,
+                    Zs,ms,c0refs,u0refs,
+                    vpa,vperp,fixed_background_plasma)
     # assemble weak form, solve mass matrix for CC at collocation points
     fokker_planck_collision_operator_solve!(
                     CC, ff_in, rosenbluth_potentials, 1.0, 1.0, nuref,

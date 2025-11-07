@@ -801,7 +801,7 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
                 atol_max = 1.0e-5,
                 atol_L2 = 1.0e-7,
                 print_to_screen=false,
-                assembly_option=repeat_assembly_per_species::multi_species_operator_type,
+                #assembly_option=repeat_assembly_per_species::multi_species_operator_type,
                 )
     nuref = 1.0
     #test_numerical_conserving_terms = false
@@ -815,9 +815,9 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
     u0ref2species = [1.1,-0.8]
     n0ref2species = [0.9,1.5]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
-            (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
-                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,assembly_option),
-                                                #(multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
+            (boundary_data_option, species, bc, multi_species_operator_option) in (
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
                                                 )
         vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
             Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc,bc_vperp=bc)
