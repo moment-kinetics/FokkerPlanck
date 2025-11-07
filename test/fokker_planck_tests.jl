@@ -547,7 +547,8 @@ function test_rosenbluth_potential_grid_conversion(; ngrid=9,
                                 rtol = 5.0e-6,
                                 atol = 1.0e-14,
                                 boundary_data_option=multipole_expansion::boundary_data_type,
-                                print_to_screen=false)
+                                print_to_screen=false,
+                                test_self_conversion=false)
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                 Lvpa=Lvpa,Lvperp=Lvperp)
     electron_mass = 1.0/1836.0
@@ -604,7 +605,8 @@ function test_rosenbluth_potential_grid_conversion(; ngrid=9,
             convert_rosenbluth_potentials_from_source_to_other_grid!(rosenbluth_potentials_s_converted_numerical,
                 rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
                 species.c0ref[isp], species.u0ref[isp],
-                calculate_GG=true,calculate_dGdvperp=true,calculate_HH=true)
+                calculate_GG=true,calculate_dGdvperp=true,calculate_HH=true,
+                test_identity_conversion=test_self_conversion)
             # test G
             @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.GG - rosenbluth_potentials_s_converted_exact.GG)
             max_G_err = maximum(vpavperp_err)
@@ -1291,9 +1293,10 @@ function runtests()
 
         @testset "conversion of Rosenbluth potentials from source to other grids" begin
             println("    - test conversion of Rosenbluth potentials from source to other grids")
-            @testset "$boundary_data_option" for boundary_data_option in (multipole_expansion,delta_f_multipole)
-                println("        -  boundary_data_option=$boundary_data_option")
-                test_rosenbluth_potential_grid_conversion(boundary_data_option=boundary_data_option)
+            @testset "$boundary_data_option $test_self_conversion" for boundary_data_option in (multipole_expansion,delta_f_multipole), test_self_conversion in (true,false)
+                println("        -  boundary_data_option=$boundary_data_option test_self_conversion=$test_self_conversion")
+                test_rosenbluth_potential_grid_conversion(boundary_data_option=boundary_data_option,
+                                test_self_conversion=test_self_conversion)
             end
         end
 
