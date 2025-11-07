@@ -603,7 +603,8 @@ function test_rosenbluth_potential_grid_conversion(; ngrid=9,
             # do the grid interpolation/extrapolation
             convert_rosenbluth_potentials_from_source_to_other_grid!(rosenbluth_potentials_s_converted_numerical,
                 rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
-                species.c0ref[isp], species.u0ref[isp],calculate_GG=true,calculate_dGdvperp=true)
+                species.c0ref[isp], species.u0ref[isp],
+                calculate_GG=true,calculate_dGdvperp=true,calculate_HH=true)
             # test G
             @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.GG - rosenbluth_potentials_s_converted_exact.GG)
             max_G_err = maximum(vpavperp_err)

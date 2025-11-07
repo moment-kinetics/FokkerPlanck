@@ -3948,7 +3948,8 @@ function convert_rosenbluth_potentials_from_source_to_other_grid!(
             vpa::finite_element_coordinate, vperp::finite_element_coordinate,
             c0ref_source::mk_float, u0ref_source::mk_float,
             c0ref_other::mk_float, u0ref_other::mk_float;
-            calculate_GG=false,calculate_dGdvperp=false)
+            calculate_GG=false::Bool,calculate_dGdvperp=false::Bool,
+            calculate_HH=false::Bool)
     # denote source grid with s, other grid with s' = sp
     c0refs = c0ref_source
     u0refs = u0ref_source
@@ -3983,10 +3984,12 @@ function convert_rosenbluth_potentials_from_source_to_other_grid!(
             vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
             ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
     end
-    rosenbluth_potential_to_other_grid!(HLabel(), rosenbluth_potentials_other_grid.HH,
-        rosenbluth_potentials_source_grid.HH, expansion_data,
-        vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
-        ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    if calculate_HH
+        rosenbluth_potential_to_other_grid!(HLabel(), rosenbluth_potentials_other_grid.HH,
+            rosenbluth_potentials_source_grid.HH, expansion_data,
+            vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
+            ivperp_max_sp,ivpa_min_sp,ivpa_max_sp)
+    end
     rosenbluth_potential_to_other_grid!(dHdvpaLabel(), rosenbluth_potentials_other_grid.dHdvpa,
         rosenbluth_potentials_source_grid.dHdvpa, expansion_data,
         vpa, vperp, c0refs, u0refs, c0refsp, u0refsp,
