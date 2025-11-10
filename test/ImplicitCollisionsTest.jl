@@ -47,11 +47,15 @@ function test_implicit_collisions(;
     mass_range = [1.0 for is in 1:nspecies]
     zeds_range = [1.0 for is in 1:nspecies]
     density_range = [1.0/nspecies for is in 1:nspecies]
+    c0ref_range = [1.0 for is in 1:nspecies]
+    u0ref_range = [0.0 for is in 1:nspecies]
+    n0ref_range = [1.0 for is in 1:nspecies]
     return test_multispecies_implicit_collisions(;
         # initial pdf info
         vth0=vth0_range, vperp0=vperp0_range, vpa0=vpa0_range, zbeam=zbeam_range,
         # species info
-        mass=mass_range, zeds=zeds_range, density_in=density_range,
+        mass=mass_range, zeds=zeds_range, c0ref=c0ref_range, u0ref=u0ref_range, n0ref=n0ref_range,
+        density_in=density_range,
         # grid info
         ngrid=ngrid, nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
         Lvpa=Lvpa, Lvperp=Lvperp,
@@ -81,7 +85,8 @@ function test_multispecies_implicit_collisions(;
     # initial pdf info
     vth0=[0.5,0.5]::Vector{mk_float}, vperp0=[1.0,1.0]::Vector{mk_float}, vpa0=[0.0,0.0]::Vector{mk_float}, zbeam=[0.0,0.0]::Vector{mk_float},
     # species info
-    mass=[1.0,1.0]::Vector{mk_float}, zeds=[1.0,1.0]::Vector{mk_float}, density_in=[1.0,1.0]::Vector{mk_float},
+    mass=[1.0,1.0]::Vector{mk_float}, zeds=[1.0,1.0]::Vector{mk_float}, c0ref=[1.0,1.0]::Vector{mk_float},
+    u0ref=[0.0,0.0]::Vector{mk_float}, n0ref=[1.0,1.0]::Vector{mk_float}, density_in=[1.0,1.0]::Vector{mk_float},
     # grid info
     ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
     Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
@@ -111,7 +116,9 @@ function test_multispecies_implicit_collisions(;
     # check inputs are consistent
     @boundscheck (nspecies == length(mass) && nspecies == length(vth0)
                    && nspecies == length(vperp0) && nspecies == length(vpa0)
-                   && nspecies == length(zbeam) && nspecies == length(density_in)) || throw(BoundsError(zeds))
+                   && nspecies == length(zbeam) && nspecies == length(density_in)
+                   && nspecies == length(c0ref) && nspecies == length(u0ref)
+                   && nspecies == length(n0ref)) || throw(BoundsError(zeds))
     # check density_in > 0
     for is in 1:nspecies
         if density_in[is] < 1.0e-14
@@ -133,7 +140,7 @@ function test_multispecies_implicit_collisions(;
     end
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
     fkpl_arrays = fokker_planck_backward_euler_data(
-                        mass, zeds,
+                        mass, zeds, c0ref, u0ref, n0ref,
                         input_vpa,
                         input_vperp;
                         bc_vpa=bc_vpa,
@@ -240,7 +247,8 @@ function test_implicit_slowing_down(;
     # source info
     source_rate=[1.0]::Vector{mk_float}, source_v0=[1.0]::Vector{mk_float}, source_vth=[0.05]::Vector{mk_float}, sink_rate=[5.0]::Vector{mk_float}, sink_vth=0.05::mk_float, constant_sink=false::Bool,
     # species info
-    mass=[1.0]::Vector{mk_float}, zeds=[2.0]::Vector{mk_float}, density_in=[1.0e-8]::Vector{mk_float},
+    mass=[1.0]::Vector{mk_float}, zeds=[2.0]::Vector{mk_float}, c0ref=[1.0]::Vector{mk_float},
+    u0ref=[0.0]::Vector{mk_float}, n0ref=[1.0]::Vector{mk_float}, density_in=[1.0e-8]::Vector{mk_float},
     # grid info
     ngrid=5::mk_int, nelement_vpa=32::mk_int, nelement_vperp=16::mk_int,
     Lvpa=3.0::mk_float, Lvperp=1.5::mk_float,
@@ -267,7 +275,9 @@ function test_implicit_slowing_down(;
     # check inputs are consistent
     @boundscheck (nspecies == length(mass) && nspecies == length(vth0)
                    && nspecies == length(vperp0) && nspecies == length(vpa0)
-                   && nspecies == length(zbeam) && nspecies == length(density_in)) || throw(BoundsError(zeds))
+                   && nspecies == length(zbeam) && nspecies == length(density_in)
+                   && nspecies == length(c0ref) && nspecies == length(u0ref)
+                   && nspecies == length(n0ref)) || throw(BoundsError(zeds))
     # check density_in > 0
     for is in 1:nspecies
         if density_in[is] < 1.0e-14
@@ -291,7 +301,7 @@ function test_implicit_slowing_down(;
     source_data_in = slowing_down_source_data_input(source_rate,source_vth,source_v0,sink_rate,sink_vth,constant_sink)
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
     fkpl_arrays = fokker_planck_backward_euler_data(
-                        mass, zeds,
+                        mass, zeds, c0ref, u0ref, n0ref,
                         input_vpa,
                         input_vperp;
                         bc_vpa=bc_vpa,

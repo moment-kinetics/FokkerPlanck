@@ -1202,6 +1202,9 @@ struct fokker_planck_backward_euler_data
     function fokker_planck_backward_euler_data(
         mass::Vector{mk_float},
         zeds::Vector{mk_float},
+        c0refs::Vector{mk_float},
+        u0refs::Vector{mk_float},
+        n0refs::Vector{mk_float},
         inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
         inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
         bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
@@ -1219,7 +1222,7 @@ struct fokker_planck_backward_euler_data
                                     bc=bc_vperp)
         vpa = finite_element_coordinate("vpa", inputs_vpa,
                                     bc=bc_vpa)
-        species = species_info(mass,zeds)
+        species = species_info(mass,zeds,c0refs,u0refs,n0refs)
         # use constructor function for fokkerplanck_weakform_arrays_struct
         return fokker_planck_backward_euler_data(vpa,vperp,species,
                     boundary_data_option,multi_species_operator_option,
