@@ -388,11 +388,14 @@ function multi_species_numerical_error_corrections_test(;
     vth0 = 0.5,
     atol = 5.0e-14,
     print_to_screen=false,
+    c0ref = [1.0, 1.0],
+    u0ref = [0.0, 0.0],
+    n0ref = [1.0, 1.0],
     )
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=Lvpa,Lvperp=Lvperp)
     boundary_data_option = multipole_expansion
-    species = species_info([1.0,2.0],[1.0,2.0])
+    species = species_info([1.0,2.0],[1.0,2.0],c0ref,u0ref,n0ref)
     fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                         print_to_screen=print_to_screen)
 
@@ -409,12 +412,16 @@ function multi_species_numerical_error_corrections_test(;
     end
     for is in 1:species.n
         mass = species.mass
-        @views density = get_density(pdf_new[:,:,is], vpa, vperp)
-        @views upar = get_upar(pdf_new[:,:,is], vpa, vperp, density)
-        @views pressure = get_pressure(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views ppar = get_ppar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views qpar = get_qpar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views rmom = get_rmom(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        c0 = species.c0ref
+        u0 = species.u0ref
+        n0 = species.n0ref
+        @views density = n0[is]*get_density(pdf_new[:,:,is], vpa, vperp)
+        @views up0 = get_upar(pdf_new[:,:,is], vpa, vperp, density/n0[is])
+        @views upar = c0[is]*up0 + u0[is]
+        @views pressure = n0[is]*(c0[is]^2)*get_pressure(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views ppar = n0[is]*(c0[is]^2)*get_ppar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views qpar = n0[is]*(c0[is]^3)*get_qpar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views rmom = n0[is]*(c0[is]^4)*get_rmom(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
         # println("density: $density")
         # println("upar: $upar")
         # println("pressure: $pressure")
@@ -424,12 +431,12 @@ function multi_species_numerical_error_corrections_test(;
         # println("qpar/ppar $(qpar/ppar)")
         # check test pdf unchanged, and has nonzero qpar
         if abeam == 0.5 && vpa0 == 1.0 && vperp0 == 1.0 && vth0 == 0.5
-            @test isapprox(density, 7.416900452984803, atol=atol)
-            @test isapprox(upar, 0.33114644602432997, atol=atol)
-            @test isapprox(pressure, mass[is]*4.242094519010763, atol=atol)
-            @test isapprox(ppar, mass[is]*2.5479896423369506, atol=atol)
-            @test isapprox(qpar, mass[is]*0.29147880412034594, atol=atol)
-            @test isapprox(rmom, mass[is]*27.57985752143237, atol=6*atol)
+            @test isapprox(density, n0[is]*7.416900452984803, atol=atol)
+            @test isapprox(upar, c0[is]*0.33114644602432997 + u0[is], atol=atol)
+            @test isapprox(pressure, mass[is]*n0[is]*(c0[is]^2)*4.242094519010763, atol=atol)
+            @test isapprox(ppar, mass[is]*n0[is]*(c0[is]^2)*2.5479896423369506, atol=atol)
+            @test isapprox(qpar, mass[is]*n0[is]*(c0[is]^3)*0.29147880412034594, atol=atol)
+            @test isapprox(rmom, mass[is]*n0[is]*(c0[is]^4)*27.57985752143237, atol=10*atol)
         end
     end
 
@@ -437,9 +444,12 @@ function multi_species_numerical_error_corrections_test(;
     densitys, upars, vths = [1.1, 0.9], [1.0, 0.75], [1.0, 1.0]
     @inbounds begin
         for is in 1:species.n
+            prefactor = (species.c0ref[is]^3)/species.n0ref[is]
             for ivperp in 1:vperp.n
+                vperp_val = species.c0ref[is]*vperp.grid[ivperp]
                 for ivpa in 1:vpa.n
-                    pdf_old[ivpa,ivperp,is] = F_Maxwellian(densitys[is],upars[is],vths[is],vpa.grid[ivpa],vperp.grid[ivperp])
+                    vpa_val = species.c0ref[is]*vpa.grid[ivpa] + species.u0ref[is]
+                    pdf_old[ivpa,ivperp,is] = prefactor*F_Maxwellian(densitys[is],upars[is],vths[is],vpa_val,vperp_val)
                 end
             end
         end
@@ -451,8 +461,8 @@ function multi_species_numerical_error_corrections_test(;
 
     # check pdf_new and pdf_old now have the same density, total momentum and total energy moments
     for is in 1:species.n
-        @views n_new = get_density(pdf_new[:,:,is], vpa, vperp)
-        @views n_old = get_density(pdf_old[:,:,is], vpa, vperp)
+        @views n_new = species.n0ref[is]*get_density(pdf_new[:,:,is], vpa, vperp)
+        @views n_old = species.n0ref[is]*get_density(pdf_old[:,:,is], vpa, vperp)
         @test abs(n_new-n_old) < atol
     end
     # compute total parallel momentum
@@ -1668,6 +1678,12 @@ function runtests()
         @testset "numerical error correcting terms" begin
             println("    - test numerical error correcting terms")
             multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [1.0, 1.0], u0ref = [0.0, 0.0], n0ref = [0.4, 3.0], atol=3.0e-13)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [1.0, 1.0], u0ref = [0.7, 1.1], n0ref = [0.4, 3.0], atol=3.0e-13)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [0.5, 2.0], u0ref = [0.7, 1.1], n0ref = [0.4, 3.0], atol=3.0e-13)
         end
 
 

@@ -4421,6 +4421,9 @@ function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     mass = species.mass
+    c0ref = species.c0ref
+    u0ref = species.u0ref
+    n0ref = species.n0ref
     # moments of the pdf for each species
     density = fkpl_arrays.density
     upar = fkpl_arrays.upar
@@ -4446,16 +4449,19 @@ function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
 
         for is in 1:species.n
             # compute moments of the input pdf_new
-            @views density[is] = get_density(pdf_new[:,:,is], vpa, vperp)
-            @views upar[is] = get_upar(pdf_new[:,:,is], vpa, vperp, density[is])
-            @views pressure[is] = get_pressure(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views ppar[is] = get_ppar(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views qpar[is] = get_qpar(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
-            @views rmom[is] = get_rmom(pdf_new[:,:,is], vpa, vperp, upar[is], mass[is])
+            @views density[is] = n0ref[is]*get_density(pdf_new[:,:,is], vpa, vperp)
+            @views up0 = get_upar(pdf_new[:,:,is], vpa, vperp, density[is]/n0ref[is]) # upar in reference frame of species s
+            upar[is] = c0ref[is]*up0 + u0ref[is]
+            @views pressure[is] = n0ref[is]*(c0ref[is]^2)*get_pressure(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+            @views ppar[is] = n0ref[is]*(c0ref[is]^2)*get_ppar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+            @views qpar[is] = n0ref[is]*(c0ref[is]^3)*get_qpar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+            @views rmom[is] = n0ref[is]*(c0ref[is]^4)*get_rmom(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
             # compute necessary moments of delta_pdf
-            @views delta_n[is] = get_density(delta_pdf[:,:,is], vpa, vperp)
-            @views delta_P[is] = mass[is]*get_upar(delta_pdf[:,:,is], vpa, vperp, 1.0)
-            @views delta_E[is] = 1.5*get_pressure(delta_pdf[:,:,is], vpa, vperp, 0.0, mass[is])
+            @views delta_n[is] = n0ref[is]*get_density(delta_pdf[:,:,is], vpa, vperp)
+            @views delta_P[is] = mass[is]*(n0ref[is]*c0ref[is]*get_upar(delta_pdf[:,:,is], vpa, vperp, 1.0)
+                                                        + delta_n[is]*u0ref[is])
+            upzero = (0.0 - u0ref[is])/c0ref[is] # vpa in species s frame corresponding to vpa = 0 in lab frame
+            @views delta_E[is] = 1.5*n0ref[is]*(c0ref[is]^2)*get_pressure(delta_pdf[:,:,is], vpa, vperp, upzero, mass[is])
         end
 
         b0, b1 = 0.0, 0.0
@@ -4477,8 +4483,8 @@ function conserving_corrections!(pdf_new::AbstractArray{mk_float,3},
             x0 = (delta_n[is]/density[is]) - 3.0*(pressure[is]/(mass[is]*density[is]))*x2
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    wpar = vpa.grid[ivpa] - upar[is]
-                    pdf_new[ivpa,ivperp,is] -= (x0 + x1*wpar + x2*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_new[ivpa,ivperp,is]
+                    wpar = vpa.grid[ivpa] - (upar[is] - u0ref[is])/c0ref[is]
+                    pdf_new[ivpa,ivperp,is] -= (x0 + x1*c0ref[is]*wpar + x2*(c0ref[is]^2)*(vperp.grid[ivperp]^2 + wpar^2) )*pdf_new[ivpa,ivperp,is]
                 end
             end
         end
