@@ -59,33 +59,38 @@ function calculate_total_change(CCs,fkpl_arrays)
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
     mass = species.mass
+    c0ref = species.c0ref
+    u0ref = species.u0ref
+    n0ref = species.n0ref
     total_momentum_change = 0.0
     total_energy_change = 0.0
     for is in 1:species.n
-        @views total_momentum_change += mass[is]*get_upar(CCs[:,:,is],vpa,vperp,1.0)
-        @views total_energy_change += 3.0*get_pressure(CCs[:,:,is],vpa,vperp,0.0,mass[is])
+        @views total_momentum_change += mass[is]*n0ref[is]*(c0ref[is]*get_upar(CCs[:,:,is],vpa,vperp,1.0)
+                                            + u0ref[is]*get_density(CCs[:,:,is],vpa,vperp))
+        up0 = (0.0 - u0ref[is])/c0ref[is] # velocity in reference frame of species s corresponding to lab frame u=0
+        @views total_energy_change += 3.0*n0ref[is]*(c0ref[is]^2)*get_pressure(CCs[:,:,is],vpa,vperp,up0,mass[is])
     end
     return total_momentum_change, total_energy_change
 end
 
 function get_moments(pdf::AbstractArray{mk_float,2},
-    fkpl_arrays::fokkerplanck_weakform_arrays_struct,mass::mk_float)
-    # extract coordinates
-    vpa = fkpl_arrays.vpa
-    vperp = fkpl_arrays.vperp
+    vpa::finite_element_coordinate,vperp::finite_element_coordinate,
+    mass::mk_float,c0ref::mk_float,u0ref::mk_float,n0ref::mk_float)
     dens = get_density(pdf,vpa,vperp)
     if abs(dens) < 1.0e-14
-        upar, pressure, temperature, vth, ppar, qpar, rmom = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        density, upar, pressure, temperature, vth, ppar, qpar, rmom = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     else
-        upar = get_upar(pdf, vpa, vperp, dens)
-        pressure = get_pressure(pdf, vpa, vperp, upar, mass)
-        temperature = pressure/dens
-        vth = sqrt(2.0*pressure/(dens*mass))
-        ppar = get_ppar(pdf, vpa, vperp, upar, mass)
-        qpar = get_qpar(pdf, vpa, vperp, upar, mass)
-        rmom = get_rmom(pdf, vpa, vperp, upar, mass)
+        density = n0ref*dens
+        up0 = get_upar(pdf, vpa, vperp, dens)
+        upar = c0ref*up0 + u0ref
+        pressure = n0ref*(c0ref^2)*get_pressure(pdf, vpa, vperp, up0, mass)
+        temperature = pressure/density
+        vth = sqrt(2.0*temperature/mass)
+        ppar = n0ref*(c0ref^2)*get_ppar(pdf, vpa, vperp, up0, mass)
+        qpar = n0ref*(c0ref^3)*get_qpar(pdf, vpa, vperp, up0, mass)
+        rmom = n0ref*(c0ref^4)*get_rmom(pdf, vpa, vperp, up0, mass)
     end
-    return dens, upar, vth, pressure, temperature, ppar, qpar, rmom
+    return density, upar, vth, pressure, temperature, ppar, qpar, rmom
 end
 
 function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
@@ -110,13 +115,17 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
             moments.temperature[is],
             moments.ppar[is],
             moments.qpar[is],
-            moments.rmom[is] = @views get_moments(pdf[:,:,is],fkpl_arrays,species.mass[is])
+            moments.rmom[is] = @views get_moments(pdf[:,:,is],vpa,vperp,species.mass[is],
+                                        species.c0ref[is],species.u0ref[is],species.n0ref[is])
+            prefactor = (species.c0ref[is]^3)/species.n0ref[is]
             for ivperp in 1:vperp.n
+                vperp_val = species.c0ref[is]*vperp.grid[ivperp]
                 for ivpa in 1:vpa.n
-                    pdf_exact[ivpa,ivperp,is] = F_Maxwellian(moments.density[is],
+                    vpa_val = species.c0ref[is]*vpa.grid[ivpa] + species.u0ref[is]
+                    pdf_exact[ivpa,ivperp,is] = prefactor*F_Maxwellian(moments.density[is],
                                                             moments.upar[is],
                                                             moments.vth[is],
-                                                            vpa.grid[ivpa],vperp.grid[ivperp])
+                                                            vpa_val,vperp_val)
                 end
             end
         end
