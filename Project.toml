@@ -21,9 +21,9 @@ SuiteSparse = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [sources]
-FiniteElementMatrices = {rev = "main", url = "https://github.com/moment-kinetics/FiniteElementMatrices"}
+FiniteElementMatrices = {rev = "main", url = "https://github.com/moment-kinetics/FiniteElementMatrices.jl"}
 JacobianFreeNewtonKrylov = {rev = "main", url = "https://github.com/moment-kinetics/JacobianFreeNewtonKrylov"}
-LagrangePolynomials = {rev = "main", url = "https://github.com/moment-kinetics/LagrangePolynomials"}
+LagrangePolynomials = {rev = "main", url = "https://github.com/moment-kinetics/LagrangePolynomials.jl"}
 
 [compat]
 FiniteElementMatrices = "0.1.0"
