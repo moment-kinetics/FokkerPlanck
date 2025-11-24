@@ -49,11 +49,11 @@ using SparseArrays: sparse, AbstractSparseArray
 using SuiteSparse
 using LinearAlgebra: ldiv!, mul!, LU, ldiv, lu, lu!
 using FastGaussQuadrature
-using LagrangePolynomials: lagrange_poly, lagrange_poly_data
+using LagrangePolynomials: lagrange_poly, LagrangePolyData
 using FiniteElementMatrices: lagrange_x,
                              d_lagrange_dx,
                              finite_element_matrix,
-                             element_coordinates
+                             ElementCoordinates
 using JacobianFreeNewtonKrylov: nl_solver_info
 """
 Options for selecting which boundary data calculation to use
@@ -1194,7 +1194,7 @@ struct fokker_planck_backward_euler_data
     ```
     or
     ```
-        inputs = Array{element_coordinates,1}(undef, nelement)
+        inputs = Array{ElementCoordinates,1}(undef, nelement)
     ```
     where the former type is defined in `FokkerPlanck.coordinates`
     and the latterr is defined in `FiniteElementMatrices`.
@@ -1205,8 +1205,8 @@ struct fokker_planck_backward_euler_data
         c0refs::Vector{mk_float},
         u0refs::Vector{mk_float},
         n0refs::Vector{mk_float},
-        inputs_vpa::Union{scalar_coordinate_inputs,Array{element_coordinates,1}},
-        inputs_vperp::Union{scalar_coordinate_inputs,Array{element_coordinates,1}};
+        inputs_vpa::Union{scalar_coordinate_inputs,Array{ElementCoordinates,1}},
+        inputs_vperp::Union{scalar_coordinate_inputs,Array{ElementCoordinates,1}};
         bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
         bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
         boundary_data_option=multipole_expansion::boundary_data_type,
@@ -3911,8 +3911,8 @@ function interpolate_2D_vspace!(pdf_out::AbstractArray{mk_float,2},
     return nothing
 end
 
-function interpolate_2D(vpa_lpoly_data::lagrange_poly_data,vpa_igrid_full::AbstractArray{mk_int,1},vpa_ngrid::mk_int,vpa_val::mk_float,
-            vperp_lpoly_data::lagrange_poly_data,vperp_igrid_full::AbstractArray{mk_int,1},vperp_ngrid::mk_int,vperp_val::mk_float,
+function interpolate_2D(vpa_lpoly_data::LagrangePolyData,vpa_igrid_full::AbstractArray{mk_int,1},vpa_ngrid::mk_int,vpa_val::mk_float,
+            vperp_lpoly_data::LagrangePolyData,vperp_igrid_full::AbstractArray{mk_int,1},vperp_ngrid::mk_int,vperp_val::mk_float,
             pdf_in::AbstractArray{mk_float,2})
     result = 0.0
     for ivperpgrid in 1:vperp_ngrid

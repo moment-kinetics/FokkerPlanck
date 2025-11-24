@@ -130,7 +130,7 @@ function test_multispecies_implicit_collisions(;
     input_vpa_scalar = scalar_coordinate_inputs(ngrid, nelement_vpa, Lvpa)
     input_vperp_scalar = scalar_coordinate_inputs(ngrid, nelement_vperp, Lvperp)
     if test_external_chebyshev_grid
-        # construct an instance of Array{element_coordinates,1} to use user-provided custom grid
+        # construct an instance of Array{ElementCoordinates,1} to use user-provided custom grid
         input_vpa = chebyshev_grid("vpa",input_vpa_scalar)
         input_vperp = chebyshev_grid("vperp",input_vperp_scalar)
     else
