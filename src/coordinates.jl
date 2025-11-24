@@ -12,8 +12,8 @@ export first_derivative!,
 using LinearAlgebra
 using SparseArrays: sparse, AbstractSparseArray
 using SuiteSparse
-using LagrangePolynomials: lagrange_poly_data, lagrange_poly
-using FiniteElementMatrices: element_coordinates,
+using LagrangePolynomials: LagrangePolyData, lagrange_poly
+using FiniteElementMatrices: ElementCoordinates,
                              lagrange_x,
                              d_lagrange_dx,
                              finite_element_matrix
@@ -49,7 +49,7 @@ struct first_derivative_data
                                         nelement::mk_int,
                                         n::mk_int,
                                         igrid_full::Array{mk_int,2},
-                                        element_data::Array{element_coordinates,1})
+                                        element_data::Array{ElementCoordinates,1})
         # Local mass matrix = \int phi_i(x) phi_j(x) dx
         MM = Array{mk_float,3}(undef,ngrid,ngrid,nelement)
         # \int phi_i(x) phi'_j(x) dx
@@ -136,12 +136,12 @@ end
 This struct encapsulates the unique information
 required to create an instance of
 ```
-    Array{element_coordinates,1}
+    Array{ElementCoordinates,1}
 ```
 to permit an interface with a single function
 for initialising the arrays for the finite element
 problem, whilst retaining the convenience of
-not having to construct the `element_coordinates`
+not having to construct the `ElementCoordinates`
 types manually in all tests.
 """
 struct scalar_coordinate_inputs
@@ -201,9 +201,9 @@ struct finite_element_coordinate
     # list of element boundaries
     element_boundaries::Array{mk_float,1}
     # Lagrange Polynomial data for each element
-    lpoly_data::Union{Array{lagrange_poly_data,1},Nothing}
+    lpoly_data::Union{Array{LagrangePolyData,1},Nothing}
     # Coordinate data for each element
-    element_data::Union{Array{element_coordinates,1},Nothing}
+    element_data::Union{Array{ElementCoordinates,1},Nothing}
     # data required to take a first derivative (only)
     derivative_data::Union{first_derivative_data,Nothing}
     """
@@ -235,13 +235,13 @@ struct finite_element_coordinate
         if ngrid > 1
             # get the nodes on [-1,1] for each element
             reference_nodes = reference_grids(ngrid,nelement,name)
-            element_data = Array{element_coordinates,1}(undef,nelement)
+            element_data = Array{ElementCoordinates,1}(undef,nelement)
             for ielement in 1:nelement
                 # get the reference nodes defined on [-1,1] (or (-1,1] on radau elements))
                 scale = element_scale[ielement]
                 shift = element_shift[ielement]
                 @views x_nodes = reference_nodes[:,ielement]
-                element_data[ielement] = element_coordinates(x_nodes,
+                element_data[ielement] = ElementCoordinates(x_nodes,
                                                         scale,
                                                         shift)
             end
@@ -253,7 +253,7 @@ struct finite_element_coordinate
     """
     This is the fundamental internal constructor
     for `finite_element_coordinate`, which takes
-    `element_data::Union{Array{element_coordinates,1},Nothing}`
+    `element_data::Union{Array{ElementCoordinates,1},Nothing}`
     as an argument to define the grid.
 
     The option to pass a value with type `Nothing` is
@@ -265,7 +265,7 @@ struct finite_element_coordinate
         name::String,
         # array containing data defining element grids
         # from which the coordinate struct can be created
-        element_data::Union{Array{element_coordinates,1},Nothing};
+        element_data::Union{Array{ElementCoordinates,1},Nothing};
         # which boundary condition to use
         bc=natural_boundary_condition::finite_element_boundary_condition_type)
         if typeof(element_data) == Nothing
@@ -347,14 +347,14 @@ struct finite_element_coordinate
             wgts[1] = 1.0
         end
         if ngrid > 1
-            lpoly_data = Array{lagrange_poly_data,1}(undef,nelement)
-            #element_data = Array{element_coordinates,1}(undef,nelement)
+            lpoly_data = Array{LagrangePolyData,1}(undef,nelement)
+            #element_data = Array{ElementCoordinates,1}(undef,nelement)
             #x_nodes = allocate_float(ngrid)
             for ielement in 1:nelement
                 # get the local grid in global coord system
                 grid_local = grid[igrid_full[1,ielement]:igrid_full[ngrid,ielement]]
                 # get Lagrange Poly data for interpolating in global coordinates
-                lpoly_data[ielement] = lagrange_poly_data(grid_local)
+                lpoly_data[ielement] = LagrangePolyData(grid_local)
             end
         else
             lpoly_data = nothing
