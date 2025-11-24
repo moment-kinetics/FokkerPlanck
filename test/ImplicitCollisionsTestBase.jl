@@ -9,7 +9,7 @@ using FokkerPlanck.coordinates: scalar_coordinate_inputs,
                             zero_boundary_condition, natural_boundary_condition
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_qpar, get_rmom
-using FiniteElementMatrices: element_coordinates
+using FiniteElementMatrices: ElementCoordinates
 using Printf
 
 function diagnose_F_Maxwellian(pdf::AbstractArray{mk_float,2},
@@ -86,15 +86,15 @@ function chebyshev_grid(name::String,
     grid_lobatto = chebyshevpoints(ngrid)
     # construct the struct that contains the information
     # needed for FokkerPlanck to construct the internal vpa vperp grids.
-    element_data = Array{element_coordinates,1}(undef,nelement)
+    element_data = Array{ElementCoordinates,1}(undef,nelement)
     if name == "vperp"
         grid_low = grid_radau
     else
         grid_low = grid_lobatto
     end
-    element_data[1] = element_coordinates(grid_low, element_scale[1], element_shift[1])
+    element_data[1] = ElementCoordinates(grid_low, element_scale[1], element_shift[1])
     for j in 2:nelement
-        element_data[j] = element_coordinates(grid_lobatto,element_scale[j],element_shift[j])
+        element_data[j] = ElementCoordinates(grid_lobatto,element_scale[j],element_shift[j])
     end
     return element_data
 end
