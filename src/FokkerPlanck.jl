@@ -62,7 +62,8 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plan
                                 species_info, calculate_cross_species_rosenbluth_potential_sums!,
                                 multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species,
                                 fixed_background_plasma_input, slowing_down_source_data_input,
-                                slowing_down_source!, slowing_down_sink!, add_slowing_down_source!
+                                slowing_down_source!, slowing_down_sink!, add_slowing_down_source!,
+                                convert_rosenbluth_potentials_from_source_to_other_grid!
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
                             F_Maxwellian, dFdvpa_Maxwellian, dFdvperp_Maxwellian
 using JacobianFreeNewtonKrylov: newton_solve!
@@ -115,7 +116,7 @@ function fokker_planck_collision_operator_weak_form!(
         calculate_rosenbluth_potentials_via_analytical_Maxwellian!(rosenbluth_potentials,ffsp_in,vpa,vperp,msp)
     else
         calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials,ffsp_in,
-             vpa,vperp,fkpl_arrays.fprp_solver_data,msp,
+             vpa,vperp,fkpl_arrays.fprp_solver_data,
              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
              calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
     end
@@ -158,7 +159,7 @@ function fokker_planck_collision_operator_weak_form!(
     else
         for is in 1:species.n
             @views calculate_rosenbluth_potentials_via_elliptic_solve!(rosenbluth_potentials_s[is],ff_in[:,:,is],
-                    vpa,vperp,fkpl_arrays.fprp_solver_data,species.mass[is],
+                    vpa,vperp,fkpl_arrays.fprp_solver_data,
                     algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
                     calculate_GG=calculate_GG,calculate_dGdvperp=calculate_dGdvperp)
         end
@@ -168,17 +169,19 @@ function fokker_planck_collision_operator_weak_form!(
         # only once per species to reduce cost, but still get the correction terms for each
         # species species' pair of collison operators using finite-element integrals
         # storage for summed potentials
-        rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
+        rosenbluth_potentials_total = fkpl_arrays.rosenbluth_potentials
+        rosenbluth_potentials_buffer = fkpl_arrays.rosenbluth_potentials_buffer
         fixed_background_plasma = fkpl_arrays.fixed_background_plasma
         # for each species, sum up the Rosenbluth potentials to make the appropriate
         # total Rosenbluth potential, and assemble the collision operator
         for is in 1:species.n
-            calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    rosenbluth_potentials_s,species,species.zeds[is],species.mass[is],
-                    fixed_background_plasma)
+            calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials_total,
+                    rosenbluth_potentials_buffer,rosenbluth_potentials_s,species,
+                    species.zeds[is],species.mass[is],species.c0ref[is],species.u0ref[is],
+                    vpa,vperp,fixed_background_plasma)
             # assemble weak form and solve mass matrix problem for CCssp
             @views fokker_planck_collision_operator_solve!(
-                         CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials, 1.0, 1.0, nuref,
+                         CCs[:,:,is], ff_in[:,:,is], rosenbluth_potentials_total, 1.0, 1.0, nuref,
                          rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
         end
     else
@@ -186,6 +189,9 @@ function fokker_planck_collision_operator_weak_form!(
         Cssp = fkpl_arrays.fprp_solver_data.matrix_operators.S_dummy
         mass = species.mass
         zeds = species.zeds
+        c0ref = species.c0ref
+        u0ref = species.u0ref
+        n0ref = species.n0ref
         # moments of collisions for each cross-species pair
         delta_n_sp_s = fkpl_arrays.delta_n_sp_s
         delta_m_sp_s = fkpl_arrays.delta_m_sp_s
@@ -195,23 +201,31 @@ function fokker_planck_collision_operator_weak_form!(
         upar = fkpl_arrays.upar
         # collect the calculated moments
         for is in 1:species.n
-            @views density[is] = get_density(ff_in[:,:,is], vpa, vperp)
-            @views upar[is] = get_upar(ff_in[:,:,is], vpa, vperp, density[is])
+            @views density[is] = n0ref[is]*get_density(ff_in[:,:,is], vpa, vperp)
+            @views upar[is] = c0ref[is]*get_upar(ff_in[:,:,is], vpa, vperp, density[is]/n0ref[is]) + u0ref[is]
         end
+        # get the rosenbluth potential buffer array
+        rosenbluth_potentials = fkpl_arrays.rosenbluth_potentials
         @. CCs[:,:,:] = 0.0
         for is in 1:species.n
             for isp in 1:species.n
-                nussp = nuref*(zeds[is]*zeds[isp]/mass[is])^2
+                # interpolate/extrapolate rosenbluth potentials onto s grid
+                convert_rosenbluth_potentials_from_source_to_other_grid!(
+                    rosenbluth_potentials, rosenbluth_potentials_s[isp],
+                    vpa, vperp, c0ref[isp], u0ref[isp], c0ref[is], u0ref[is];
+                    calculate_GG=false,calculate_dGdvperp=false)
+                nussp = nuref*((zeds[is]*zeds[isp]/mass[is])^2)*(n0ref[isp]/(c0ref[isp]*c0ref[is]^2))
                 # assemble weak form and solve mass matrix problem for Cssp
                 @views fokker_planck_collision_operator_solve!(
-                            Cssp, ff_in[:,:,is], rosenbluth_potentials_s[isp], mass[is], mass[isp], nussp,
+                            Cssp, ff_in[:,:,is], rosenbluth_potentials,
+                            mass[is]*c0ref[is], mass[isp]*c0ref[isp], nussp,
                             rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp)
                 # impose any non-natural boundary conditions
                 enforce_vpavperp_BCs!(Cssp,vpa,vperp)
                 # get moments
-                delta_n_sp_s[isp,is] = get_density(Cssp, vpa, vperp)
-                delta_m_sp_s[isp,is] = mass[is]*(get_upar(Cssp, vpa, vperp, 1.0) - upar[is]*delta_n_sp_s[isp,is])
-                delta_p_sp_s[isp,is] = get_pressure(Cssp, vpa, vperp, upar[is], mass[is])
+                delta_n_sp_s[isp,is] = n0ref[is]*get_density(Cssp, vpa, vperp)
+                delta_m_sp_s[isp,is] = mass[is]*(n0ref[is]*c0ref[is]*get_upar(Cssp, vpa, vperp, 1.0) - (upar[is] - u0ref[is])*delta_n_sp_s[isp,is])
+                delta_p_sp_s[isp,is] = n0ref[is]*(c0ref[is]^2)*get_pressure(Cssp, vpa, vperp, (upar[is]-u0ref[is])/c0ref[is], mass[is])
                 # sum up the collision operator contributions
                 @. CCs[:,:,is] += Cssp
             end
@@ -219,8 +233,9 @@ function fokker_planck_collision_operator_weak_form!(
             @views fokker_planck_cross_species_collision_operator!(
                         Cssp,
                         ff_in[:,:,is],
-                        nuref, mass[is], zeds[is],
+                        nuref, mass[is], zeds[is], c0ref[is], u0ref[is],
                         fkpl_arrays.rosenbluth_potentials,
+                        fkpl_arrays.rosenbluth_potentials_buffer,
                         fkpl_arrays.fixed_background_plasma,
                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
                         use_conserving_corrections=use_conserving_corrections)
@@ -240,14 +255,16 @@ Cross-species collisions due to fixed background plasma.
 function fokker_planck_cross_species_collision_operator!(
                         CC::AbstractArray{mk_float,2},
                         ff_in::AbstractArray{mk_float,2},
-                        nuref::mk_float, ms::mk_float, Zs::mk_float,
-                        rosenbluth_potentials,
+                        nuref::mk_float, ms::mk_float, Zs::mk_float, c0refs::mk_float, u0refs::mk_float,
+                        rosenbluth_potentials, rosenbluth_potentials_buffer,
                         fixed_background_plasma,
                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
                         use_conserving_corrections=true::Bool)
     # calculate the Rosenbluth potentials due to the background plasma
     calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
-                    Zs,ms,fixed_background_plasma)
+                    rosenbluth_potentials_buffer,
+                    Zs,ms,c0refs,u0refs,
+                    vpa,vperp,fixed_background_plasma)
     # assemble weak form, solve mass matrix for CC at collocation points
     fokker_planck_collision_operator_solve!(
                     CC, ff_in, rosenbluth_potentials, 1.0, 1.0, nuref,
@@ -297,10 +314,11 @@ function calculate_entropy_production(
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    lnfC[ivpa,ivperp] = log(abs(pdf[ivpa,ivperp,is]) + 1.0e-15)*CCs[ivpa,ivperp,is]
+                    lnf = log(abs(pdf[ivpa,ivperp,is]) + 1.0e-15) + log(species.n0ref[is]/species.c0ref[is]^3)
+                    lnfC[ivpa,ivperp] = lnf*CCs[ivpa,ivperp,is]
                 end
             end
-            dSdt += -get_density(lnfC,vpa,vperp)
+            dSdt += -species.n0ref[is]*get_density(lnfC,vpa,vperp)
         end
     end
     return dSdt

@@ -35,7 +35,7 @@ function expected_nelement_integral_scaling!(expected,nelement_list,ngrid,nscan)
     end
 end
 """
-L2norm assuming the input is the 
+L2norm assuming the input is the
 absolution error ff_err = ff - ff_exact
 We compute sqrt( int (ff_err)^2 d^3 v / int d^3 v)
 where the volume of velocity space is finite
@@ -55,9 +55,9 @@ end
 function init_grids(nelement,ngrid)
     element_spacing_option = "uniform"
     # define inputs needed for the test
-    Lvpa = 12.0 #physical box size in reference units 
-    Lvperp = 6.0 #physical box size in reference units 
-    
+    Lvpa = 12.0 #physical box size in reference units
+    Lvperp = 6.0 #physical box size in reference units
+
     element_spacing_option = "uniform"
     # create the coordinate structs
     vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
@@ -77,13 +77,13 @@ test_Lagrange_integral_scan = true
 function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     # set up grids for input Maxwellian
     vpa, vperp =  init_grids(nelement,ngrid)
-    # set up necessary inputs for collision operator functions 
+    # set up necessary inputs for collision operator functions
     nvperp = vperp.n
     nvpa = vpa.n
     println("beginning allocation   ", Dates.format(now(), dateformat"H:MM:SS"))
-    
+
     fs_in = Array{mk_float,2}(undef,nvpa,nvperp)
-    
+
     dfsdvpa_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     d2fsdvpa2_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     dfsdvperp_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
@@ -94,7 +94,7 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     dfsdvperp_err = Array{mk_float,2}(undef,nvpa,nvperp)
     d2fsdvperpdvpa_err = Array{mk_float,2}(undef,nvpa,nvperp)
     d2fsdvperp2_err = Array{mk_float,2}(undef,nvpa,nvperp)
-    
+
     GG_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     GG_err = allocate_float(nvpa,nvperp)
     d2Gdvpa2_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
@@ -105,16 +105,16 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     d2Gdvperpdvpa_err = allocate_float(nvpa,nvperp)
     d2Gdvperp2_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     d2Gdvperp2_err = allocate_float(nvpa,nvperp)
-    
+
     HH_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     HH_err = allocate_float(nvpa,nvperp)
     dHdvpa_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     dHdvpa_err = allocate_float(nvpa,nvperp)
     dHdvperp_Maxwell = Array{mk_float,2}(undef,nvpa,nvperp)
     dHdvperp_err = allocate_float(nvpa,nvperp)
-    
+
     println("setting up input arrays   ", Dates.format(now(), dateformat"H:MM:SS"))
-    
+
     # set up test Maxwellian
     denss = 1.0 #3.0/4.0
     upars = 0.0 #2.0/3.0
@@ -123,35 +123,35 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     pperps = get_pperp(press, ppars)
     ms = 1.0
     vths = get_vth(press,denss,ms)
-    
+
     for ivperp in 1:nvperp
         for ivpa in 1:nvpa
-            fs_in[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp) #(denss/vths^3)*exp( - ((vpa.grid[ivpa]-upar)^2 + vperp.grid[ivperp]^2)/vths^2 ) 
-            dfsdvpa_Maxwell[ivpa,ivperp] = dFdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            dfsdvperp_Maxwell[ivpa,ivperp] = dFdvperp_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            d2fsdvperpdvpa_Maxwell[ivpa,ivperp] = d2Fdvperpdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            
-            GG_Maxwell[ivpa,ivperp] = G_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            d2Gdvpa2_Maxwell[ivpa,ivperp] = d2Gdvpa2_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            dGdvperp_Maxwell[ivpa,ivperp] = dGdvperp_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            d2Gdvperpdvpa_Maxwell[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            d2Gdvperp2_Maxwell[ivpa,ivperp] = d2Gdvperp2_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            HH_Maxwell[ivpa,ivperp] = H_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            dHdvperp_Maxwell[ivpa,ivperp] = dHdvperp_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-            dHdvpa_Maxwell[ivpa,ivperp] = dHdvpa_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
+            fs_in[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp]) #(denss/vths^3)*exp( - ((vpa.grid[ivpa]-upar)^2 + vperp.grid[ivperp]^2)/vths^2 )
+            dfsdvpa_Maxwell[ivpa,ivperp] = dFdvpa_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            dfsdvperp_Maxwell[ivpa,ivperp] = dFdvperp_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2fsdvperpdvpa_Maxwell[ivpa,ivperp] = d2Fdvperpdvpa_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+
+            GG_Maxwell[ivpa,ivperp] = G_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvpa2_Maxwell[ivpa,ivperp] = d2Gdvpa2_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            dGdvperp_Maxwell[ivpa,ivperp] = dGdvperp_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvperpdvpa_Maxwell[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvperp2_Maxwell[ivpa,ivperp] = d2Gdvperp2_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            HH_Maxwell[ivpa,ivperp] = H_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            dHdvperp_Maxwell[ivpa,ivperp] = dHdvperp_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+            dHdvpa_Maxwell[ivpa,ivperp] = dHdvpa_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
         end
     end
-    
+
     # initialise the weights
     fokkerplanck_arrays = fokkerplanck_arrays_direct_integration_struct(vperp,vpa)
     fka = fokkerplanck_arrays
 
-    
+
     # calculate the potentials by direct integration
     calculate_rosenbluth_potentials_via_direct_integration!(fka.GG,fka.HH,fka.dHdvpa,fka.dHdvperp,
              fka.d2Gdvpa2,fka.dGdvperp,fka.d2Gdvperpdvpa,fka.d2Gdvperp2,fs_in,
              vpa,vperp,fka)
-            
+
     # error analysis of distribution function
     println("finished integration   ", Dates.format(now(), dateformat"H:MM:SS"))
     @. dfsdvpa_err = abs(fka.dfdvpa - dfsdvpa_Maxwell)
@@ -163,19 +163,19 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     @. d2fsdvperpdvpa_err = abs(fka.d2fdvperpdvpa - d2fsdvperpdvpa_Maxwell)
     max_d2fsdvperpdvpa_err = maximum(d2fsdvperpdvpa_err)
     println("max_d2fsdvperpdvpa_err: ",max_d2fsdvperpdvpa_err)
-    
+
     plot_dHdvpa = false #true
     plot_dHdvperp = false #true
     plot_d2Gdvperp2 = false #true
     plot_d2Gdvperpdvpa = false #true
     plot_dGdvperp = false #true
     plot_d2Gdvpa2 = false #true
-    
+
     @. GG_err = abs(fka.GG - GG_Maxwell)
     max_GG_err, max_GG_index = findmax(GG_err)
     println("max_GG_err: ",max_GG_err," ",max_GG_index)
     println("spot check GG_err: ",GG_err[end,end], " GG: ",fka.GG[end,end])
-    
+
     @. HH_err = abs(fka.HH - HH_Maxwell)
     max_HH_err, max_HH_index = findmax(HH_err)
     println("max_HH_err: ",max_HH_err," ",max_HH_index)
@@ -188,7 +188,7 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     max_dHdvpa_err, max_dHdvpa_index = findmax(dHdvpa_err)
     println("max_dHdvpa_err: ",max_dHdvpa_err," ",max_dHdvpa_index)
     println("spot check dHdvpa_err: ",dHdvpa_err[end,end], " dHdvpa: ",fka.dHdvpa[end,end])
-    
+
     if plot_dHdvpa
         @views heatmap(vperp.grid, vpa.grid, dHspdvpa[:,:], xlabel=L"v_{\perp}", ylabel=L"v_{||}", c = :deep, interpolation = :cubic,
                 windowsize = (360,240), margin = 15pt)
@@ -292,7 +292,7 @@ function test_Lagrange_Rosenbluth_potentials(ngrid,nelement; standalone=true)
     #println(maximum(G_err), maximum(H_err), maximum(dHdvpa_err), maximum(dHdvperp_err), maximum(d2Gdvperp2_err), maximum(d2Gdvpa2_err), maximum(d2Gdvperpdvpa_err), maximum(dGdvperp_err))
     results = (maximum(GG_err), maximum(HH_err), maximum(dHdvpa_err), maximum(dHdvperp_err), maximum(d2Gdvperp2_err), maximum(d2Gdvpa2_err), maximum(d2Gdvperpdvpa_err), maximum(dGdvperp_err),
     maximum(dfsdvpa_err), maximum(dfsdvperp_err), maximum(d2fsdvperpdvpa_err))
-    return results 
+    return results
 end
 
 function test_rosenbluth_potentials_direct_integration(;ngrid=5,nelement_list=[2],plot_scan=true,save_HDF5=true)
@@ -312,15 +312,15 @@ function test_rosenbluth_potentials_direct_integration(;ngrid=5,nelement_list=[2
         max_dfsdvpa_err = Array{mk_float,1}(undef,nscan)
         max_dfsdvperp_err = Array{mk_float,1}(undef,nscan)
         max_d2fsdvperpdvpa_err = Array{mk_float,1}(undef,nscan)
-        
+
         expected = Array{mk_float,1}(undef,nscan)
         expected_nelement_scaling!(expected,nelement_list,ngrid,nscan)
         expected_integral = Array{mk_float,1}(undef,nscan)
         expected_nelement_integral_scaling!(expected_integral,nelement_list,ngrid,nscan)
-        
+
         expected_label = L"(1/N_{el})^{n_g - 1}"
         expected_integral_label = L"(1/N_{el})^{n_g +1}"
-        
+
         for iscan in 1:nscan
             local nelement = nelement_list[iscan]
             ((max_G_err[iscan], max_H_err[iscan], max_dHdvpa_err[iscan],
@@ -343,33 +343,33 @@ function test_rosenbluth_potentials_direct_integration(;ngrid=5,nelement_list=[2
             #println(max_G_err,max_H_err,max_dHdvpa_err,max_dHdvperp_err,max_d2Gdvperp2_err,max_d2Gdvpa2_err,max_d2Gdvperpdvpa_err,max_dGdvperp_err, expected)
             plot(nelement_list, [max_dHdvpa_err,max_dHdvperp_err,max_d2Gdvperp2_err,max_d2Gdvpa2_err,max_d2Gdvperpdvpa_err,max_dGdvperp_err, expected, expected_integral],
             xlabel=xlabel, label=[dHdvpalabel dHdvperplabel d2Gdvperp2label d2Gdvpa2label d2Gdvperpdvpalabel dGdvperplabel expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             #outfile = "fkpl_coeffs_numerical_lagrange_integration_test_ngrid_"*string(ngrid)*".pdf"
             outfile = "fkpl_essential_coeffs_numerical_lagrange_integration_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
-            
+
             HHlabel = L"\epsilon(H)"
             GGlabel = L"\epsilon(G)"
             #println(max_G_err,max_H_err,max_dHdvpa_err,max_dHdvperp_err,max_d2Gdvperp2_err,max_d2Gdvpa2_err,max_d2Gdvperpdvpa_err,max_dGdvperp_err, expected)
             plot(nelement_list, [max_H_err, max_G_err, expected, expected_integral],
             xlabel=xlabel, label=[HHlabel GGlabel expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             #outfile = "fkpl_coeffs_numerical_lagrange_integration_test_ngrid_"*string(ngrid)*".pdf"
             outfile = "fkpl_potentials_numerical_lagrange_integration_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
-            
+
             dfsdvpa_label = L"\epsilon(d F_s / d v_{\|\|})"
             dfsdvperp_label = L"\epsilon(d F_s /d v_{\perp})"
             d2fsdvperpdvpa_label = L"\epsilon(d^2 F_s /d v_{\perp}d v_{\|\|})"
             plot(nelement_list, [max_dfsdvpa_err,max_dfsdvperp_err,max_d2fsdvperpdvpa_err,expected],
             xlabel=xlabel, label=[dfsdvpa_label dfsdvperp_label d2fsdvperpdvpa_label expected_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             #outfile = "fkpl_coeffs_numerical_lagrange_integration_test_ngrid_"*string(ngrid)*".pdf"
@@ -383,7 +383,7 @@ function test_rosenbluth_potentials_direct_integration(;ngrid=5,nelement_list=[2
             save_fkpl_integration_error_data(outdir, ncore, ngrid, nelement_list,
                 max_dfsdvpa_err, max_dfsdvperp_err, max_d2fsdvperpdvpa_err,
                 max_H_err, max_G_err, max_dHdvpa_err, max_dHdvperp_err,
-                max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err, 
+                max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err,
                 expected, expected_integral)
         end
     end
@@ -396,4 +396,4 @@ if abspath(PROGRAM_FILE) == @__FILE__
     nelement_list = [2,4,8,16,32]
     plot_scan = true
     test_rosenbluth_potentials_direct_integration(ngrid=ngrid,nelement_list=nelement_list,plot_scan=plot_scan)
-end 
+end

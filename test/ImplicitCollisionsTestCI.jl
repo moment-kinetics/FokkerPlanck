@@ -61,7 +61,8 @@ atol = 1.0e-13
         for test_input_array_type in (true,false)
             # test array typing for cheapest CI test only
             output_pdf_and_grid = test_multispecies_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-               vth0=[0.5],vperp0=[1.0],vpa0=[1.0],mass=[1.0],zeds=[1.0],zbeam=[0.0],density_in=[1.0],
+               vth0=[0.5],vperp0=[1.0],vpa0=[1.0],zbeam=[0.0],density_in=[1.0],
+               mass=[1.0],zeds=[1.0],c0ref=[1.0],u0ref=[0.0],n0ref=[1.0],
                nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
                bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
                ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false,
@@ -75,7 +76,8 @@ atol = 1.0e-13
         end
         println("        - test nspecies=2")
         output_pdf_and_grid = test_multispecies_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-            vth0=[0.5, 0.5],vperp0=[1.0, 1.0],vpa0=[1.0,0.1],mass=[1.0,2.0],zeds=[-1.0,2.0],zbeam=[0.0,0.5],density_in=[1.0,0.5],
+            vth0=[0.5, 0.5],vperp0=[1.0, 1.0],vpa0=[1.0,0.1],zbeam=[0.0,0.5],density_in=[1.0,0.5],
+            mass=[1.0,2.0],zeds=[-1.0,2.0],c0ref=[1.0,1.0],u0ref=[0.0,0.0],n0ref=[1.0,1.0],
             nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
             bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false, atol=1.0e-10, nonlinear_max_iterations=20,
@@ -87,7 +89,9 @@ atol = 1.0e-13
         end
         println("        - test nspecies=3")
         output_pdf_and_grid = test_multispecies_implicit_collisions(test_particle_preconditioner=true,test_numerical_conserving_terms=true,
-            vth0=[0.5, 0.5, 0.5],vperp0=[1.0, 1.0, 1.0],vpa0=[1.0,0.1,-0.5],mass=[0.5,1.0,2.0],zeds=[-1.0,1.0,2.0],zbeam=[0.0,0.5,0.1],density_in=[1.0,2.0/3.0,1.0/3.0],nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
+            vth0=[0.5, 0.5, 0.5],vperp0=[1.0, 1.0, 1.0],vpa0=[1.0,0.1,-0.5],zbeam=[0.0,0.5,0.1],density_in=[1.0,2.0/3.0,1.0/3.0],
+            mass=[0.5,1.0,2.0],zeds=[-1.0,1.0,2.0],c0ref=[1.0,1.0,1.0],u0ref=[0.0,0.0,0.0],n0ref=[1.0,1.0,1.0],
+            nelement_vpa=6,nelement_vperp=3,Lvpa=10.0,Lvperp=5.0,
             bc_vpa=natural_boundary_condition, bc_vperp=natural_boundary_condition,
             ntime=100, delta_t = 1.0, ngrid=5, test_linearised_advance=false, atol=1.0e-10, nonlinear_max_iterations=20,
             test_type=continuous_integration_test, print_diagnostics=false, print_timing=false)

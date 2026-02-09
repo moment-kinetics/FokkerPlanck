@@ -12,8 +12,8 @@ using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inp
                                 natural_boundary_condition, zero_boundary_condition
 using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
-using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole,
-                                            repeat_assembly_per_species, single_assembly_per_species
+using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole, boundary_data_type,
+                                            repeat_assembly_per_species, single_assembly_per_species, multi_species_operator_type
 
 using FokkerPlanck: fokker_planck_backward_euler_data, fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
@@ -27,7 +27,9 @@ using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_da
 using FokkerPlanck.fokker_planck_calculus: enforce_vpavperp_BCs!, calculate_rosenbluth_potentials_via_direct_integration!
 using FokkerPlanck.fokker_planck_calculus: interpolate_2D_vspace!, calculate_test_particle_preconditioner!
 using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, fokkerplanck_weakform_arrays_struct,
-                                            fokkerplanck_arrays_direct_integration_struct
+                                            fokkerplanck_arrays_direct_integration_struct, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
+                                            convert_rosenbluth_potentials_from_source_to_other_grid!, rosenbluth_potential_data,
+                                            calculate_analytical_Maxwellian_multipole_expansion_moments!, delta_f_multipole_moments
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=12.0,Lvperp=6.0,bc_vpa=zero_boundary_condition,bc_vperp=zero_boundary_condition)
@@ -102,8 +104,8 @@ function backward_Euler_linearised_collisions_test(;
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                FMaxwell[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                pdf[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                FMaxwell[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                pdf[ivpa,ivperp] = F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -166,7 +168,7 @@ function diagnose_F_Maxwellian(pdf,pdf_exact,pdf_dummy_1,pdf_dummy_2,vpa,vperp,t
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                pdf_exact[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                pdf_exact[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -241,7 +243,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    Fold[ivpa,ivperp,is] = F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
+                    Fold[ivpa,ivperp,is] = F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -297,7 +299,7 @@ function backward_Euler_fokker_planck_self_collisions_test(;
             vth[is] = sqrt(2.0*pressure/(density[is]*species.mass[is]))
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    FMaxwell[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                    FMaxwell[ivpa,ivperp,is] = F_Maxwellian(density[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
         end
@@ -354,7 +356,8 @@ function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
     species::species_info)
     parallel_momentum = 0.0
     for is in 1:species.n
-        @views gamma = get_upar(ff[:,:,is],vpa,vperp,1.0)
+        @views gamma = species.n0ref[is]*(species.c0ref[is]*get_upar(ff[:,:,is],vpa,vperp,1.0)
+                                 + species.u0ref[is]*get_density(ff[:,:,is],vpa,vperp))
         parallel_momentum += species.mass[is]*gamma
     end
     return parallel_momentum
@@ -366,7 +369,9 @@ function get_total_energy(ff::AbstractArray{mk_float,3},
     species::species_info)
     energy = 0.0
     for is in 1:species.n
-        @views energy += get_pressure(ff[:,:,is],vpa,vperp,0.0,species.mass[is])
+        @views energy += ((species.n0ref[is]*species.c0ref[is]^2)*
+                            get_pressure(ff[:,:,is],vpa,vperp,
+                                -species.u0ref[is]/species.c0ref[is],species.mass[is]))
     end
     return energy
 end
@@ -383,11 +388,14 @@ function multi_species_numerical_error_corrections_test(;
     vth0 = 0.5,
     atol = 5.0e-14,
     print_to_screen=false,
+    c0ref = [1.0, 1.0],
+    u0ref = [0.0, 0.0],
+    n0ref = [1.0, 1.0],
     )
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=Lvpa,Lvperp=Lvperp)
     boundary_data_option = multipole_expansion
-    species = species_info([1.0,2.0],[1.0,2.0])
+    species = species_info([1.0,2.0],[1.0,2.0],c0ref,u0ref,n0ref)
     fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
                                         print_to_screen=print_to_screen)
 
@@ -397,19 +405,23 @@ function multi_species_numerical_error_corrections_test(;
     for is in 1:species.n
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-                pdf_new[ivpa,ivperp,is] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa,vperp,ivpa,ivperp)
-                                            + F_Beam(0.0,vperp0,vth0,vpa,vperp,ivpa,ivperp))
+                pdf_new[ivpa,ivperp,is] = (abeam * F_Beam(vpa0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp])
+                                            + F_Beam(0.0,vperp0,vth0,vpa.grid[ivpa],vperp.grid[ivperp]))
             end
         end
     end
     for is in 1:species.n
         mass = species.mass
-        @views density = get_density(pdf_new[:,:,is], vpa, vperp)
-        @views upar = get_upar(pdf_new[:,:,is], vpa, vperp, density)
-        @views pressure = get_pressure(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views ppar = get_ppar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views qpar = get_qpar(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
-        @views rmom = get_rmom(pdf_new[:,:,is], vpa, vperp, upar, mass[is])
+        c0 = species.c0ref
+        u0 = species.u0ref
+        n0 = species.n0ref
+        @views density = n0[is]*get_density(pdf_new[:,:,is], vpa, vperp)
+        @views up0 = get_upar(pdf_new[:,:,is], vpa, vperp, density/n0[is])
+        @views upar = c0[is]*up0 + u0[is]
+        @views pressure = n0[is]*(c0[is]^2)*get_pressure(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views ppar = n0[is]*(c0[is]^2)*get_ppar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views qpar = n0[is]*(c0[is]^3)*get_qpar(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
+        @views rmom = n0[is]*(c0[is]^4)*get_rmom(pdf_new[:,:,is], vpa, vperp, up0, mass[is])
         # println("density: $density")
         # println("upar: $upar")
         # println("pressure: $pressure")
@@ -419,12 +431,12 @@ function multi_species_numerical_error_corrections_test(;
         # println("qpar/ppar $(qpar/ppar)")
         # check test pdf unchanged, and has nonzero qpar
         if abeam == 0.5 && vpa0 == 1.0 && vperp0 == 1.0 && vth0 == 0.5
-            @test isapprox(density, 7.416900452984803, atol=atol)
-            @test isapprox(upar, 0.33114644602432997, atol=atol)
-            @test isapprox(pressure, mass[is]*4.242094519010763, atol=atol)
-            @test isapprox(ppar, mass[is]*2.5479896423369506, atol=atol)
-            @test isapprox(qpar, mass[is]*0.29147880412034594, atol=atol)
-            @test isapprox(rmom, mass[is]*27.57985752143237, atol=6*atol)
+            @test isapprox(density, n0[is]*7.416900452984803, atol=atol)
+            @test isapprox(upar, c0[is]*0.33114644602432997 + u0[is], atol=atol)
+            @test isapprox(pressure, mass[is]*n0[is]*(c0[is]^2)*4.242094519010763, atol=atol)
+            @test isapprox(ppar, mass[is]*n0[is]*(c0[is]^2)*2.5479896423369506, atol=atol)
+            @test isapprox(qpar, mass[is]*n0[is]*(c0[is]^3)*0.29147880412034594, atol=atol)
+            @test isapprox(rmom, mass[is]*n0[is]*(c0[is]^4)*27.57985752143237, atol=10*atol)
         end
     end
 
@@ -432,9 +444,12 @@ function multi_species_numerical_error_corrections_test(;
     densitys, upars, vths = [1.1, 0.9], [1.0, 0.75], [1.0, 1.0]
     @inbounds begin
         for is in 1:species.n
+            prefactor = (species.c0ref[is]^3)/species.n0ref[is]
             for ivperp in 1:vperp.n
+                vperp_val = species.c0ref[is]*vperp.grid[ivperp]
                 for ivpa in 1:vpa.n
-                    pdf_old[ivpa,ivperp,is] = F_Maxwellian(densitys[is],upars[is],vths[is],vpa,vperp,ivpa,ivperp)
+                    vpa_val = species.c0ref[is]*vpa.grid[ivpa] + species.u0ref[is]
+                    pdf_old[ivpa,ivperp,is] = prefactor*F_Maxwellian(densitys[is],upars[is],vths[is],vpa_val,vperp_val)
                 end
             end
         end
@@ -446,8 +461,8 @@ function multi_species_numerical_error_corrections_test(;
 
     # check pdf_new and pdf_old now have the same density, total momentum and total energy moments
     for is in 1:species.n
-        @views n_new = get_density(pdf_new[:,:,is], vpa, vperp)
-        @views n_old = get_density(pdf_old[:,:,is], vpa, vperp)
+        @views n_new = species.n0ref[is]*get_density(pdf_new[:,:,is], vpa, vperp)
+        @views n_old = species.n0ref[is]*get_density(pdf_old[:,:,is], vpa, vperp)
         @test abs(n_new-n_old) < atol
     end
     # compute total parallel momentum
@@ -501,10 +516,10 @@ function test_interpolate_2D_vspace(; ngrid=9,
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
-            Fe[ivpa,ivperp] = F_Maxwellian(dense,upare,vthe,vpa,vperp,ivpa,ivperp)
-            Fe_exact_ion_units[ivpa,ivperp] = F_Maxwellian(dense,upare/scalefac,vthe/scalefac,vpa,vperp,ivpa,ivperp)/(scalefac^3)
-            Fi[ivpa,ivperp] = F_Maxwellian(densi,upari,vthi,vpa,vperp,ivpa,ivperp)
-            Fi_exact_electron_units[ivpa,ivperp] = (scalefac^3)*F_Maxwellian(densi,upari*scalefac,vthi*scalefac,vpa,vperp,ivpa,ivperp)
+            Fe[ivpa,ivperp] = F_Maxwellian(dense,upare,vthe,vpa.grid[ivpa],vperp.grid[ivperp])
+            Fe_exact_ion_units[ivpa,ivperp] = F_Maxwellian(dense,upare/scalefac,vthe/scalefac,vpa.grid[ivpa],vperp.grid[ivperp])/(scalefac^3)
+            Fi[ivpa,ivperp] = F_Maxwellian(densi,upari,vthi,vpa.grid[ivpa],vperp.grid[ivperp])
+            Fi_exact_electron_units[ivpa,ivperp] = (scalefac^3)*F_Maxwellian(densi,upari*scalefac,vthi*scalefac,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
     end
@@ -532,6 +547,129 @@ function test_interpolate_2D_vspace(; ngrid=9,
     #println(max_F)
     @test max_F_err < rtol * max_F
 
+    return nothing
+end
+
+function test_rosenbluth_potential_grid_conversion(; ngrid=9,
+                                nelement_vpa=16,
+                                nelement_vperp = 8,
+                                Lvpa=12.0, Lvperp=6.0,
+                                rtol = 5.0e-6,
+                                atol = 1.0e-14,
+                                boundary_data_option=multipole_expansion::boundary_data_type,
+                                print_to_screen=false,
+                                test_self_conversion=false)
+    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                Lvpa=Lvpa,Lvperp=Lvperp)
+    electron_mass = 1.0/1836.0
+    thermal_temperature = 1.0
+    mass = [electron_mass, 1.0, 16.0, 16.0, 8.0]
+    zeds = [-1.0, 1.0, 8.0, 8.0, 4.0]
+    # reference speeds in units of cref = sqrt(Tref/mref)
+    c0ref = [sqrt(2.0*thermal_temperature/mass[is]) for is in 1:length(mass)]
+    u0ref = [-0.5, 1.0, 20.0, -30.0, 1.5]
+    # reference density in units of nref
+    n0ref = [0.9, 1.1, 1.5, 1.4, 0.7]
+    species = species_info(mass,zeds,c0ref,u0ref,n0ref)
+    # moments of pdfs in units of cref, nref
+    density = [0.6, 1.5, 0.7, 0.9, 0.8]
+    upar = [-0.6, 1.2, 20.1, -30.1, 1.3]
+    vth = [0.8*c0ref[1], 1.2*c0ref[2], 1.1*c0ref[3], 1.05*c0ref[4], 0.9*c0ref[5]]
+
+    # Rosenbluth potentials on natural grids
+    rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
+    # Rosenbluth potentials on grid of another species, analytical
+    rosenbluth_potentials_s_converted_exact = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+    # Rosenbluth potentials converted from natural grids to grid of another species
+    rosenbluth_potentials_s_converted_numerical = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+    # array for testing errors
+    vpavperp_err = allocate_float(vpa.n,vperp.n)
+    for is in 1:species.n
+        rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+        # get moments for Rosenbluth potentials on natural grids
+        density_in = density[is]/n0ref[is]
+        upar_in = (upar[is] - u0ref[is])/c0ref[is]
+        vth_in = vth[is]/c0ref[is]
+        calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+            rosenbluth_potentials_s[is],density_in,upar_in,vth_in,vpa,vperp)
+    end
+    for is in 1:species.n
+        # test the conversion of species s to s' grids for each primed species
+        for isp in 1:species.n
+            # first compute exact results for species s on s' grid
+            density_in = density[is]/n0ref[isp]
+            upar_in = (upar[is] - u0ref[isp])/c0ref[isp]
+            vth_in = vth[is]/c0ref[isp]
+            calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+                rosenbluth_potentials_s_converted_exact,density_in,upar_in,vth_in,vpa,vperp)
+            # make normalisation prefactor still units of species s
+            @. rosenbluth_potentials_s_converted_exact.GG *= (n0ref[isp]*c0ref[isp])/(n0ref[is]*c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.dGdvperp *= (n0ref[isp]/n0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvperp2 *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.d2Gdvpa2 *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.HH *= (n0ref[isp]/c0ref[isp])/(n0ref[is]/c0ref[is])
+            @. rosenbluth_potentials_s_converted_exact.dHdvpa *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
+            @. rosenbluth_potentials_s_converted_exact.dHdvperp *= (n0ref[isp]/c0ref[isp]^2)/(n0ref[is]/c0ref[is]^2)
+            # do the grid interpolation/extrapolation
+            convert_rosenbluth_potentials_from_source_to_other_grid!(rosenbluth_potentials_s_converted_numerical,
+                rosenbluth_potentials_s[is], vpa, vperp, species.c0ref[is], species.u0ref[is],
+                species.c0ref[isp], species.u0ref[isp],
+                calculate_GG=true,calculate_dGdvperp=true,calculate_HH=true,
+                test_identity_conversion=test_self_conversion)
+            # test G
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.GG - rosenbluth_potentials_s_converted_exact.GG)
+            max_G_err = maximum(vpavperp_err)
+            max_G = maximum(abs.(rosenbluth_potentials_s_converted_exact.GG))
+            # test dGdvperp
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dGdvperp - rosenbluth_potentials_s_converted_exact.dGdvperp)
+            max_dGdvperp_err = maximum(vpavperp_err)
+            max_dGdvperp = maximum(abs.(rosenbluth_potentials_s_converted_exact.dGdvperp))
+            # test d2Gdvperp2
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvperp2 - rosenbluth_potentials_s_converted_exact.d2Gdvperp2)
+            max_d2Gdvperp2_err = maximum(vpavperp_err)
+            max_d2Gdvperp2 = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvperp2))
+            # test d2Gdvperpdvpa
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvperpdvpa - rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa)
+            max_d2Gdvperpdvpa_err = maximum(vpavperp_err)
+            max_d2Gdvperpdvpa = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvperpdvpa))
+            # test d2Gdvpa2
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.d2Gdvpa2 - rosenbluth_potentials_s_converted_exact.d2Gdvpa2)
+            max_d2Gdvpa2_err = maximum(vpavperp_err)
+            max_d2Gdvpa2 = maximum(abs.(rosenbluth_potentials_s_converted_exact.d2Gdvpa2))
+            # test H
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.HH - rosenbluth_potentials_s_converted_exact.HH)
+            max_H_err = maximum(vpavperp_err)
+            max_H = maximum(abs.(rosenbluth_potentials_s_converted_exact.HH))
+            # test dHdvpa
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dHdvpa - rosenbluth_potentials_s_converted_exact.dHdvpa)
+            max_dHdvpa_err = maximum(vpavperp_err)
+            max_dHdvpa = maximum(abs.(rosenbluth_potentials_s_converted_exact.dHdvpa))
+            # test dHdvperp
+            @. vpavperp_err = abs(rosenbluth_potentials_s_converted_numerical.dHdvperp - rosenbluth_potentials_s_converted_exact.dHdvperp)
+            max_dHdvperp_err = maximum(vpavperp_err)
+            max_dHdvperp = maximum(abs.(rosenbluth_potentials_s_converted_exact.dHdvperp))
+            if print_to_screen
+                println("is=$is isp=$isp")
+                println("max_G=$max_G max_G_err=$max_G_err")
+                println("max_dGdvperp=$max_dGdvperp max_dGdvperp_err=$max_dGdvperp_err")
+                println("max_d2Gdvperp2=$max_d2Gdvperp2 max_d2Gdvperp2_err=$max_d2Gdvperp2_err")
+                println("max_d2Gdvperpdvpa=$max_d2Gdvperpdvpa max_d2Gdvperpdvpa_err=$max_d2Gdvperpdvpa_err")
+                println("max_d2Gdvpa2=$max_d2Gdvpa2 max_d2Gdvpa2_err=$max_d2Gdvpa2_err")
+                println("max_H=$max_H max_H_err=$max_H_err")
+                println("max_dHdvpa=$max_dHdvpa max_dHdvpa_err=$max_dHdvpa_err")
+                println("max_dHdvperp=$max_dHdvperp max_dHdvperp_err=$max_dHdvperp_err")
+            end
+            @test max_G_err < rtol * max_G + atol
+            @test max_dGdvperp_err < rtol * max_dGdvperp + atol
+            @test max_d2Gdvperp2_err < rtol * max_d2Gdvperp2 + atol
+            @test max_d2Gdvperpdvpa_err < rtol * max_d2Gdvperpdvpa + atol
+            @test max_d2Gdvpa2_err < rtol * max_d2Gdvpa2 + atol
+            @test max_H_err < rtol * max_H + atol
+            @test max_dHdvpa_err < rtol * max_dHdvpa + atol
+            @test max_dHdvperp_err < rtol * max_dHdvperp + atol
+        end
+    end
     return nothing
 end
 
@@ -581,8 +719,8 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
             for is in 1:species.n
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        F_M[ivpa,ivperp,is] = (F_Maxwellian(density[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp) +
-                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa,vperp,ivpa,ivperp))
+                        F_M[ivpa,ivperp,is] = (F_Maxwellian(density[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp]) +
+                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa.grid[ivpa],vperp.grid[ivperp]))
                     end
                 end
                 # use this commented code to assess how far from Maxwellian F_M is
@@ -612,16 +750,16 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
                             #                 + nfac^2 * C[F_sB,F_s'B]
                             C_M_exact[ivpa,ivperp,is] += (Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
                                                                             density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             nfac*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
                                                                             density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             nfac*Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
                                                                             density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp) +
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]) +
                                                             (nfac^2)*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
                                                                             density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
-                                                                            nuref,vpa,vperp,ivpa,ivperp))
+                                                                            nuref,vpa.grid[ivpa],vperp.grid[ivperp]))
                         end
                     end
                 end
@@ -670,6 +808,155 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
     return nothing
 end
 
+function multi_species_multi_reference_fokker_planck_collisions_test(;
+                ngrid=17, nelement_vpa=8, nelement_vperp=4, Lvpa=10.0, Lvperp=5.0,
+                # set small absolute values for test tolerances
+                atol_max = 1.0e-5,
+                atol_L2 = 1.0e-7,
+                print_to_screen=false,
+                #assembly_option=repeat_assembly_per_species::multi_species_operator_type,
+                )
+    nuref = 1.0
+    #test_numerical_conserving_terms = false
+    test_Maxwellian_Rosenbluth_coefficients = false
+    density = [1.0, 1.0, 1.0]
+    upar = [1.0, -0.7, 0.2]
+    vth = [2.0,1.0,1.0]
+    mass2species = [0.5,1.0]
+    zeds2species = [2.0,1.0]
+    c0ref2species = [1.9,1.1]
+    u0ref2species = [1.1,-0.8]
+    n0ref2species = [0.9,1.5]
+    @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
+            (boundary_data_option, species, bc, multi_species_operator_option) in (
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
+                                                )
+        vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+            Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc,bc_vperp=bc)
+        println("       - boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)")
+        @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
+            (test_numerical_conserving_terms,) in (false,true)
+            println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
+            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                                            multi_species_operator_option=multi_species_operator_option,
+                                                            print_to_screen=print_to_screen)
+            # arrays for the test
+            F_M = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_num = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
+            C_M_err = allocate_float(vpa.n,vperp.n)
+            dummy_array = allocate_float(vpa.n,vperp.n)
+            mass = species.mass
+            zed = species.zeds
+            c0ref = species.c0ref
+            u0ref = species.u0ref
+            n0ref = species.n0ref
+            @. C_M_exact = 0.0
+            nfac = 0.3
+            ufac = 0.7
+            # specify a pdf that has a nonzero qpar~ 0.1 pressure by summing Maxwellian distributions
+            # F_s = F_sA + nfac * F_sB
+            for is in 1:species.n
+                prefactor = (c0ref[is]^3)/n0ref[is]
+                for ivperp in 1:vperp.n
+                    vperp_s = c0ref[is]*vperp.grid[ivperp]
+                    for ivpa in 1:vpa.n
+                        vpa_s = c0ref[is]*vpa.grid[ivpa] + u0ref[is]
+                        F_M[ivpa,ivperp,is] = prefactor*(F_Maxwellian(density[is],upar[is],vth[is],vpa_s,vperp_s) +
+                                                nfac*F_Maxwellian(density[is],upar[is]*ufac,vth[is]*ufac,vpa_s,vperp_s))
+                    end
+                end
+                # assess how far from Maxwellian F_M is
+                if print_to_screen
+                    @views density_M = get_density(F_M[:,:,is], vpa, vperp)
+                    @views upar_M = get_upar(F_M[:,:,is], vpa, vperp, density_M)
+                    @views pressure_M = get_pressure(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views ppar_M = get_ppar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views qpar_M = get_qpar(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    @views rmom_M = get_rmom(F_M[:,:,is], vpa, vperp, upar_M, mass[is])
+                    println("density_M: $density_M")
+                    println("upar_M: $upar_M")
+                    println("pressure_M: $pressure_M")
+                    println("ppar_M: $ppar_M")
+                    println("qpar_M: $qpar_M")
+                    println("rmom_M: $rmom_M")
+                    println("qpar_M/ppar_M $(qpar_M/ppar_M)")
+                end
+            end
+            # sum up contributions to cross-collision operator
+            for is in 1:species.n
+                prefactor = (c0ref[is]^3)/n0ref[is]
+                for isp in 1:species.n
+                    for ivperp in 1:vperp.n
+                        vperp_s = c0ref[is]*vperp.grid[ivperp]
+                        for ivpa in 1:vpa.n
+                            vpa_s = c0ref[is]*vpa.grid[ivpa] + u0ref[is]
+                            # obtain an exact expression for the non-Maxwellian pdf
+                            # by using that the collision operator is bilinear, i.e.,
+                            # C[F_s,F_s'] =  C[F_sA,F_s'A]
+                            #                 + nfac * ( C[F_sA,F_s'B] + C[F_sB,F_s'A])
+                            #                 + nfac^2 * C[F_sB,F_s'B]
+                            C_M_exact[ivpa,ivperp,is] += prefactor*(Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                            density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            nfac*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                            density[isp],upar[isp],vth[isp],mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            nfac*Cssp_Maxwellian_inputs(density[is],upar[is],vth[is],mass[is],zed[is],
+                                                                            density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s) +
+                                                            (nfac^2)*Cssp_Maxwellian_inputs(density[is],upar[is]*ufac,vth[is]*ufac,mass[is],zed[is],
+                                                                            density[isp],upar[isp]*ufac,vth[isp]*ufac,mass[isp],zed[isp],
+                                                                            nuref,vpa_s,vperp_s))
+                        end
+                    end
+                end
+            end
+            fokker_planck_collision_operator_weak_form!(C_M_num,
+                    F_M, nuref, fkpl_arrays;
+                    use_conserving_corrections=test_numerical_conserving_terms,
+                    use_Maxwellian_Rosenbluth_coefficients=test_Maxwellian_Rosenbluth_coefficients)
+            # test relative values as C_M_exact /= 0 in general
+            rtol_max = atol_max
+            rtol_L2 = atol_L2
+            for is in 1:species.n
+                Cnorm = maximum(abs.(@view C_M_exact[:,:,is]))
+                @views C_M_max, C_M_L2 = print_test_data(C_M_exact[:,:,is],C_M_num[:,:,is],C_M_err,"C_M[$(is)]",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+                #println(Cnorm, " ", C_M_max, " ", C_M_L2)
+                @test C_M_max < atol_max + rtol_max*Cnorm
+                @test C_M_L2 < atol_L2 + rtol_L2*Cnorm
+            end
+            # test conservation properties
+            if test_numerical_conserving_terms
+                atol_n = 5.0e-12
+                atol_momentum = 3.0e-12
+                atol_energy = 3.0e-12
+            else
+                atol_n = 1.0e-11
+                atol_momentum = 1.0e-8
+                atol_energy = 1.0e-8
+            end
+            # compute changes in density induced by C_M_num
+            for is in 1:species.n
+                @views delta_n = n0ref[is]*get_density(C_M_num[:,:,is],vpa,vperp)
+                @test delta_n < atol_n
+            end
+            # compute change in total parallel momentum
+            delta_parallel_momentum = get_total_parallel_momentum(C_M_num,vpa,vperp,species)
+            @test delta_parallel_momentum < atol_momentum
+            # compute change in total energy
+            delta_energy = get_total_energy(C_M_num,vpa,vperp,species)
+            @test delta_energy < atol_energy
+            # check entropy production is positive for pdf far from Maxwellian
+            # n.b. dSdt may be negative and small if pdf is close to Maxwellian
+            dSdt = calculate_entropy_production(C_M_num,F_M,fkpl_arrays)
+            @test dSdt > 0.0
+        end
+    end
+    return nothing
+end
+
 function slowing_down_fokker_planck_collisions_test(;
     ngrid = 9,
     nelement_vpa = 16,
@@ -699,7 +986,7 @@ function slowing_down_fokker_planck_collisions_test(;
             for isp in 1:nsprime
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa,vperp,ivpa,ivperp)
+                        Fsp_M[ivpa,ivperp,isp] = F_Maxwellian(denssp[isp],uparsp[isp],vthsp[isp],vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -727,7 +1014,7 @@ function slowing_down_fokker_planck_collisions_test(;
         for is in 1:species.n
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    Fs_M[ivpa,ivperp,is] = F_Maxwellian(dens[is],upar[is],vth[is],vpa,vperp,ivpa,ivperp)
+                    Fs_M[ivpa,ivperp,is] = F_Maxwellian(dens[is],upar[is],vth[is],vpa.grid[ivpa],vperp.grid[ivperp])
                     C_M_exact[ivpa,ivperp,is] = 0.0
                 end
             end
@@ -741,7 +1028,7 @@ function slowing_down_fokker_planck_collisions_test(;
                     for ivpa in 1:vpa.n
                             C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
                                                                         dens[isp],upar[isp],vth[isp],species.mass[isp],species.zeds[isp],
-                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                                                                        nuref,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -751,7 +1038,7 @@ function slowing_down_fokker_planck_collisions_test(;
                     for ivpa in 1:vpa.n
                             C_M_exact[ivpa,ivperp,is] += Cssp_Maxwellian_inputs(dens[is],upar[is],vth[is],species.mass[is],species.zeds[is],
                                                                         denssp[isp],uparsp[isp],vthsp[isp],msp[isp],Zsp[isp],
-                                                                        nuref,vpa,vperp,ivpa,ivperp)
+                                                                        nuref,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
             end
@@ -787,6 +1074,210 @@ function slowing_down_fokker_planck_collisions_test(;
     end
     return nothing
 end
+
+function rosenbluth_potential_solver_test(;
+                    ngrid = 9,
+                    nelement_vpa = 8,
+                    nelement_vperp = 4,
+                    boundary_data_option=multipole_expansion,
+                    print_to_screen=false)
+    vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
+                                Lvpa=12.0,Lvperp=6.0)
+    species = species_info([1.0],[1.0])
+    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+                                                            print_to_screen=print_to_screen)
+    dummy_array = allocate_float(vpa.n,vperp.n)
+    F_M = allocate_float(vpa.n,vperp.n)
+    H_M_exact = allocate_float(vpa.n,vperp.n)
+    H_M_num = allocate_float(vpa.n,vperp.n)
+    H_M_err = allocate_float(vpa.n,vperp.n)
+    G_M_exact = allocate_float(vpa.n,vperp.n)
+    G_M_num = allocate_float(vpa.n,vperp.n)
+    G_M_err = allocate_float(vpa.n,vperp.n)
+    d2Gdvpa2_M_exact = allocate_float(vpa.n,vperp.n)
+    d2Gdvpa2_M_num = allocate_float(vpa.n,vperp.n)
+    d2Gdvpa2_M_err = allocate_float(vpa.n,vperp.n)
+    d2Gdvperp2_M_exact = allocate_float(vpa.n,vperp.n)
+    d2Gdvperp2_M_num = allocate_float(vpa.n,vperp.n)
+    d2Gdvperp2_M_err = allocate_float(vpa.n,vperp.n)
+    dGdvperp_M_exact = allocate_float(vpa.n,vperp.n)
+    dGdvperp_M_num = allocate_float(vpa.n,vperp.n)
+    dGdvperp_M_err = allocate_float(vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_exact = allocate_float(vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_num = allocate_float(vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_err = allocate_float(vpa.n,vperp.n)
+    dHdvpa_M_exact = allocate_float(vpa.n,vperp.n)
+    dHdvpa_M_num = allocate_float(vpa.n,vperp.n)
+    dHdvpa_M_err = allocate_float(vpa.n,vperp.n)
+    dHdvperp_M_exact = allocate_float(vpa.n,vperp.n)
+    dHdvperp_M_num = allocate_float(vpa.n,vperp.n)
+    dHdvperp_M_err = allocate_float(vpa.n,vperp.n)
+    Inm_vec = allocate_float(25)
+    Inm_vec_exact = allocate_float(25)
+    Inm_vec_err = allocate_float(25)
+
+    dens, upar, vth = 0.8, 0.99, 1.01
+
+    for ivperp in 1:vperp.n
+        for ivpa in 1:vpa.n
+            F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+            dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+        end
+    end
+    rpbd_exact = rosenbluth_potential_boundary_data(vpa,vperp)
+    # use known test function to provide exact data
+
+    calculate_rosenbluth_potential_boundary_data_exact!(rpbd_exact,
+            H_M_exact,dHdvpa_M_exact,dHdvperp_M_exact,G_M_exact,
+            dGdvperp_M_exact,d2Gdvperp2_M_exact,
+            d2Gdvperpdvpa_M_exact,d2Gdvpa2_M_exact,vpa,vperp)
+    # calculate the potentials numerically
+    calculate_rosenbluth_potentials_via_elliptic_solve!(
+            fkpl_arrays.rosenbluth_potentials, F_M, vpa, vperp,
+            fkpl_arrays.fprp_solver_data; algebraic_solve_for_d2Gdvperp2=false,
+            calculate_GG=true, calculate_dGdvperp=true)
+    # extract C[Fs,Fs'] result
+    # and Rosenbluth potentials for testing
+
+
+    @inbounds begin
+        for ivperp in 1:vperp.n
+            for ivpa in 1:vpa.n
+            G_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.GG[ivpa,ivperp]
+            H_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.HH[ivpa,ivperp]
+            dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvpa[ivpa,ivperp]
+            dHdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvperp[ivpa,ivperp]
+            dGdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dGdvperp[ivpa,ivperp]
+            d2Gdvperp2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperp2[ivpa,ivperp]
+            d2Gdvpa2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvpa2[ivpa,ivperp]
+            d2Gdvperpdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperpdvpa[ivpa,ivperp]
+            end
+        end
+    end
+    if boundary_data_option in (multipole_expansion,delta_f_multipole)
+        if boundary_data_option == multipole_expansion
+            calculate_analytical_Maxwellian_multipole_expansion_moments!(Inm_vec_exact,
+                                                                    dens,upar,vth)
+            Inm_vec .= fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments
+        elseif boundary_data_option == delta_f_multipole
+            expansion_data_exact = delta_f_multipole_moments(Inm_vec_exact,[0.0,0.0,0.0])
+            calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data_exact,
+                                                                    dens,upar,vth)
+            Inm_vec_exact = expansion_data_exact.Inm_vec
+            Inm_vec .= fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments.Inm_vec
+            @test isapprox(fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments.Maxwellian_moments,
+                            expansion_data_exact.Maxwellian_moments,atol=1.0e-9)
+        end
+        @. Inm_vec_err = abs(Inm_vec - Inm_vec_exact)
+        #println(Inm_vec_exact)
+        #println(Inm_vec_err./Inm_vec_exact)
+        rtol_Inm = 2.0e-8
+        atol_Inm = 2.0e-8
+        for j in 1:length(Inm_vec)
+            @test Inm_vec_err[j] < rtol_Inm*Inm_vec_exact[j] + atol_Inm
+        end
+    end
+    # test the boundary data
+    max_H_boundary_data_err, max_dHdvpa_boundary_data_err,
+    max_dHdvperp_boundary_data_err, max_G_boundary_data_err,
+    max_dGdvperp_boundary_data_err, max_d2Gdvperp2_boundary_data_err,
+    max_d2Gdvperpdvpa_boundary_data_err, max_d2Gdvpa2_boundary_data_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_solver_data.rpbd,rpbd_exact,vpa,vperp,print_to_screen=print_to_screen)
+    if boundary_data_option==multipole_expansion
+        atol_max_H = 5.0e-8
+        atol_max_dHdvpa = 5.0e-8
+        atol_max_dHdvperp = 5.0e-8
+        atol_max_G = 5.0e-7
+        atol_max_dGdvperp = 5.0e-7
+        atol_max_d2Gdvperp2 = 5.0e-7
+        atol_max_d2Gdvperpdvpa = 5.0e-7
+        atol_max_d2Gdvpap2 = 1.0e-6
+    else
+        atol_max_H = 2.0e-12
+        atol_max_dHdvpa = 2.0e-11
+        atol_max_dHdvperp = 6.0e-9
+        atol_max_G = 2.0e-11
+        atol_max_dGdvperp = 2.0e-7
+        atol_max_d2Gdvperp2 = 5.0e-8
+        atol_max_d2Gdvperpdvpa = 2.0e-8
+        atol_max_d2Gdvpap2 = 1.0e-11
+    end
+    @test max_H_boundary_data_err < atol_max_H
+    @test max_dHdvpa_boundary_data_err < atol_max_dHdvpa
+    @test max_dHdvperp_boundary_data_err < atol_max_dHdvperp
+    @test max_G_boundary_data_err < atol_max_G
+    @test max_dGdvperp_boundary_data_err < atol_max_dGdvperp
+    @test max_d2Gdvperp2_boundary_data_err < atol_max_d2Gdvperp2
+    @test max_d2Gdvperpdvpa_boundary_data_err < atol_max_d2Gdvperpdvpa
+    @test max_d2Gdvpa2_boundary_data_err < atol_max_d2Gdvpap2
+    # test the elliptic solvers
+    H_M_max, H_M_L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dHdvpa_M_max, dHdvpa_M_L2 = print_test_data(dHdvpa_M_exact,dHdvpa_M_num,dHdvpa_M_err,"dHdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dHdvperp_M_max, dHdvperp_M_L2 = print_test_data(dHdvperp_M_exact,dHdvperp_M_num,dHdvperp_M_err,"dHdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    G_M_max, G_M_L2 = print_test_data(G_M_exact,G_M_num,G_M_err,"G_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvpa2_M_max, d2Gdvpa2_M_L2 = print_test_data(d2Gdvpa2_M_exact,d2Gdvpa2_M_num,d2Gdvpa2_M_err,"d2Gdvpa2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dGdvperp_M_max, dGdvperp_M_L2 = print_test_data(dGdvperp_M_exact,dGdvperp_M_num,dGdvperp_M_err,"dGdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvperpdvpa_M_max, d2Gdvperpdvpa_M_L2 = print_test_data(d2Gdvperpdvpa_M_exact,d2Gdvperpdvpa_M_num,d2Gdvperpdvpa_M_err,"d2Gdvperpdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvperp2_M_max, d2Gdvperp2_M_L2 = print_test_data(d2Gdvperp2_M_exact,d2Gdvperp2_M_num,d2Gdvperp2_M_err,"d2Gdvperp2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    if boundary_data_option==multipole_expansion
+        atol_max_H = 2.0e-7
+        atol_L2_H = 5.0e-9
+        atol_max_dHdvpa = 2.0e-6
+        atol_L2_dHdvpa = 5.0e-8
+        atol_max_dHdvperp = 2.0e-5
+        atol_L2_dHdvperp = 1.0e-7
+        atol_max_G = 5.0e-7
+        atol_L2_G = 5.0e-8
+        atol_max_d2Gdvpap2 = 1.0e-6
+        atol_L2_d2Gdvpa2 = 5.0e-8
+        atol_max_dGdvperp = 2.0e-6
+        atol_L2_dGdvperp = 2.0e-7
+        atol_max_d2Gdvperpdvpa = 2.0e-6
+        atol_L2_d2Gdvperpdvpa = 5.0e-8
+        atol_max_d2Gdvperp2 = 5.0e-7
+        atol_L2_d2Gdvperp2 = 5.0e-8
+    else
+        atol_max_H = 2.0e-7
+        atol_L2_H = 5.0e-9
+        atol_max_dHdvpa = 2.0e-6
+        atol_L2_dHdvpa = 5.0e-8
+        atol_max_dHdvperp = 2.0e-5
+        atol_L2_dHdvperp = 1.0e-7
+        atol_max_G = 2.0e-8
+        atol_L2_G = 7.0e-10
+        atol_max_d2Gdvpap2 = 2.0e-7
+        atol_L2_d2Gdvpa2 = 4.0e-9
+        atol_max_dGdvperp = 2.0e-6
+        atol_L2_dGdvperp = 2.0e-7
+        atol_max_d2Gdvperpdvpa = 2.0e-6
+        atol_L2_d2Gdvperpdvpa = 2.0e-8
+        atol_max_d2Gdvperp2 = 3.0e-7
+        atol_L2_d2Gdvperp2 = 2.0e-8
+    end
+    @test H_M_max < atol_max_H
+    @test H_M_L2 < atol_L2_H
+    @test dHdvpa_M_max < atol_max_dHdvpa
+    @test dHdvpa_M_L2 < atol_L2_dHdvpa
+    @test dHdvperp_M_max < atol_max_dHdvperp
+    @test dHdvperp_M_L2 < atol_L2_dHdvperp
+    @test G_M_max < atol_max_G
+    @test G_M_L2 < atol_L2_G
+    @test d2Gdvpa2_M_max < atol_max_d2Gdvpap2
+    @test d2Gdvpa2_M_L2 < atol_L2_d2Gdvpa2
+    @test dGdvperp_M_max < atol_max_dGdvperp
+    @test dGdvperp_M_L2 < atol_L2_dGdvperp
+    @test d2Gdvperpdvpa_M_max < atol_max_d2Gdvperpdvpa
+    @test d2Gdvperpdvpa_M_L2 < atol_L2_d2Gdvperpdvpa
+    @test d2Gdvperp2_M_max < atol_max_d2Gdvperp2
+    @test d2Gdvperp2_M_L2 < atol_L2_d2Gdvperp2
+    return nothing
+end
 function runtests()
     print_to_screen = false
     @testset "Fokker Planck tests" begin
@@ -808,6 +1299,15 @@ function runtests()
         @testset "Lagrange-polynomial 2D interpolation" begin
             println("    - test Lagrange-polynomial 2D interpolation")
             test_interpolate_2D_vspace()
+        end
+
+        @testset "conversion of Rosenbluth potentials from source to other grids" begin
+            println("    - test conversion of Rosenbluth potentials from source to other grids")
+            @testset "$boundary_data_option $test_self_conversion" for boundary_data_option in (multipole_expansion,delta_f_multipole), test_self_conversion in (true,false)
+                println("        -  boundary_data_option=$boundary_data_option test_self_conversion=$test_self_conversion")
+                test_rosenbluth_potential_grid_conversion(boundary_data_option=boundary_data_option,
+                                test_self_conversion=test_self_conversion)
+            end
         end
 
         @testset "weak-form 2D differentiation" begin
@@ -879,179 +1379,8 @@ function runtests()
             println("    - test weak-form Rosenbluth potential calculation: elliptic solve")
             @testset "$boundary_data_option" for boundary_data_option in (direct_integration,multipole_expansion,delta_f_multipole)
                 println("        -  boundary_data_option=$boundary_data_option")
-                ngrid = 9
-                nelement_vpa = 8
-                nelement_vperp = 4
-                vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
-                                            Lvpa=12.0,Lvperp=6.0)
-                species = species_info([1.0],[1.0])
-                fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
-                                                                      print_to_screen=print_to_screen)
-                dummy_array = allocate_float(vpa.n,vperp.n)
-                F_M = allocate_float(vpa.n,vperp.n)
-                H_M_exact = allocate_float(vpa.n,vperp.n)
-                H_M_num = allocate_float(vpa.n,vperp.n)
-                H_M_err = allocate_float(vpa.n,vperp.n)
-                G_M_exact = allocate_float(vpa.n,vperp.n)
-                G_M_num = allocate_float(vpa.n,vperp.n)
-                G_M_err = allocate_float(vpa.n,vperp.n)
-                d2Gdvpa2_M_exact = allocate_float(vpa.n,vperp.n)
-                d2Gdvpa2_M_num = allocate_float(vpa.n,vperp.n)
-                d2Gdvpa2_M_err = allocate_float(vpa.n,vperp.n)
-                d2Gdvperp2_M_exact = allocate_float(vpa.n,vperp.n)
-                d2Gdvperp2_M_num = allocate_float(vpa.n,vperp.n)
-                d2Gdvperp2_M_err = allocate_float(vpa.n,vperp.n)
-                dGdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-                dGdvperp_M_num = allocate_float(vpa.n,vperp.n)
-                dGdvperp_M_err = allocate_float(vpa.n,vperp.n)
-                d2Gdvperpdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-                d2Gdvperpdvpa_M_num = allocate_float(vpa.n,vperp.n)
-                d2Gdvperpdvpa_M_err = allocate_float(vpa.n,vperp.n)
-                dHdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-                dHdvpa_M_num = allocate_float(vpa.n,vperp.n)
-                dHdvpa_M_err = allocate_float(vpa.n,vperp.n)
-                dHdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-                dHdvperp_M_num = allocate_float(vpa.n,vperp.n)
-                dHdvperp_M_err = allocate_float(vpa.n,vperp.n)
-
-                dens, upar, vth = 1.0, 1.0, 1.0
-
-                for ivperp in 1:vperp.n
-                    for ivpa in 1:vpa.n
-                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                        dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    end
-                end
-                rpbd_exact = rosenbluth_potential_boundary_data(vpa,vperp)
-                # use known test function to provide exact data
-
-                calculate_rosenbluth_potential_boundary_data_exact!(rpbd_exact,
-                      H_M_exact,dHdvpa_M_exact,dHdvperp_M_exact,G_M_exact,
-                      dGdvperp_M_exact,d2Gdvperp2_M_exact,
-                      d2Gdvperpdvpa_M_exact,d2Gdvpa2_M_exact,vpa,vperp)
-                # calculate the potentials numerically
-                calculate_rosenbluth_potentials_via_elliptic_solve!(
-                     fkpl_arrays.rosenbluth_potentials, F_M, vpa, vperp,
-                     fkpl_arrays.fprp_solver_data, species.mass[1]; algebraic_solve_for_d2Gdvperp2=false,
-                     calculate_GG=true, calculate_dGdvperp=true)
-                # extract C[Fs,Fs'] result
-                # and Rosenbluth potentials for testing
-
-
-                @inbounds begin
-                    for ivperp in 1:vperp.n
-                        for ivpa in 1:vpa.n
-                        G_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.GG[ivpa,ivperp]
-                        H_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.HH[ivpa,ivperp]
-                        dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvpa[ivpa,ivperp]
-                        dHdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvperp[ivpa,ivperp]
-                        dGdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dGdvperp[ivpa,ivperp]
-                        d2Gdvperp2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperp2[ivpa,ivperp]
-                        d2Gdvpa2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvpa2[ivpa,ivperp]
-                        d2Gdvperpdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperpdvpa[ivpa,ivperp]
-                        end
-                    end
-                end
-
-                # test the boundary data
-                max_H_boundary_data_err, max_dHdvpa_boundary_data_err,
-                max_dHdvperp_boundary_data_err, max_G_boundary_data_err,
-                max_dGdvperp_boundary_data_err, max_d2Gdvperp2_boundary_data_err,
-                max_d2Gdvperpdvpa_boundary_data_err, max_d2Gdvpa2_boundary_data_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_solver_data.rpbd,rpbd_exact,vpa,vperp,print_to_screen=print_to_screen)
-                if boundary_data_option==multipole_expansion
-                    atol_max_H = 5.0e-8
-                    atol_max_dHdvpa = 5.0e-8
-                    atol_max_dHdvperp = 5.0e-8
-                    atol_max_G = 5.0e-7
-                    atol_max_dGdvperp = 5.0e-7
-                    atol_max_d2Gdvperp2 = 5.0e-7
-                    atol_max_d2Gdvperpdvpa = 5.0e-7
-                    atol_max_d2Gdvpap2 = 1.0e-6
-                else
-                    atol_max_H = 2.0e-12
-                    atol_max_dHdvpa = 2.0e-11
-                    atol_max_dHdvperp = 6.0e-9
-                    atol_max_G = 1.0e-11
-                    atol_max_dGdvperp = 2.0e-7
-                    atol_max_d2Gdvperp2 = 5.0e-8
-                    atol_max_d2Gdvperpdvpa = 2.0e-8
-                    atol_max_d2Gdvpap2 = 1.0e-11
-                end
-                @test max_H_boundary_data_err < atol_max_H
-                @test max_dHdvpa_boundary_data_err < atol_max_dHdvpa
-                @test max_dHdvperp_boundary_data_err < atol_max_dHdvperp
-                @test max_G_boundary_data_err < atol_max_G
-                @test max_dGdvperp_boundary_data_err < atol_max_dGdvperp
-                @test max_d2Gdvperp2_boundary_data_err < atol_max_d2Gdvperp2
-                @test max_d2Gdvperpdvpa_boundary_data_err < atol_max_d2Gdvperpdvpa
-                @test max_d2Gdvpa2_boundary_data_err < atol_max_d2Gdvpap2
-                # test the elliptic solvers
-                H_M_max, H_M_L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                dHdvpa_M_max, dHdvpa_M_L2 = print_test_data(dHdvpa_M_exact,dHdvpa_M_num,dHdvpa_M_err,"dHdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                dHdvperp_M_max, dHdvperp_M_L2 = print_test_data(dHdvperp_M_exact,dHdvperp_M_num,dHdvperp_M_err,"dHdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                G_M_max, G_M_L2 = print_test_data(G_M_exact,G_M_num,G_M_err,"G_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                d2Gdvpa2_M_max, d2Gdvpa2_M_L2 = print_test_data(d2Gdvpa2_M_exact,d2Gdvpa2_M_num,d2Gdvpa2_M_err,"d2Gdvpa2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                dGdvperp_M_max, dGdvperp_M_L2 = print_test_data(dGdvperp_M_exact,dGdvperp_M_num,dGdvperp_M_err,"dGdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                d2Gdvperpdvpa_M_max, d2Gdvperpdvpa_M_L2 = print_test_data(d2Gdvperpdvpa_M_exact,d2Gdvperpdvpa_M_num,d2Gdvperpdvpa_M_err,"d2Gdvperpdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                d2Gdvperp2_M_max, d2Gdvperp2_M_L2 = print_test_data(d2Gdvperp2_M_exact,d2Gdvperp2_M_num,d2Gdvperp2_M_err,"d2Gdvperp2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
-                if boundary_data_option==multipole_expansion
-                    atol_max_H = 2.0e-7
-                    atol_L2_H = 5.0e-9
-                    atol_max_dHdvpa = 2.0e-6
-                    atol_L2_dHdvpa = 5.0e-8
-                    atol_max_dHdvperp = 2.0e-5
-                    atol_L2_dHdvperp = 1.0e-7
-                    atol_max_G = 5.0e-7
-                    atol_L2_G = 5.0e-8
-                    atol_max_d2Gdvpap2 = 1.0e-6
-                    atol_L2_d2Gdvpa2 = 5.0e-8
-                    atol_max_dGdvperp = 2.0e-6
-                    atol_L2_dGdvperp = 2.0e-7
-                    atol_max_d2Gdvperpdvpa = 2.0e-6
-                    atol_L2_d2Gdvperpdvpa = 5.0e-8
-                    atol_max_d2Gdvperp2 = 5.0e-7
-                    atol_L2_d2Gdvperp2 = 5.0e-8
-                else
-                    atol_max_H = 2.0e-7
-                    atol_L2_H = 5.0e-9
-                    atol_max_dHdvpa = 2.0e-6
-                    atol_L2_dHdvpa = 5.0e-8
-                    atol_max_dHdvperp = 2.0e-5
-                    atol_L2_dHdvperp = 1.0e-7
-                    atol_max_G = 2.0e-8
-                    atol_L2_G = 7.0e-10
-                    atol_max_d2Gdvpap2 = 2.0e-7
-                    atol_L2_d2Gdvpa2 = 4.0e-9
-                    atol_max_dGdvperp = 2.0e-6
-                    atol_L2_dGdvperp = 2.0e-7
-                    atol_max_d2Gdvperpdvpa = 2.0e-6
-                    atol_L2_d2Gdvperpdvpa = 2.0e-8
-                    atol_max_d2Gdvperp2 = 3.0e-7
-                    atol_L2_d2Gdvperp2 = 2.0e-8
-                end
-                @test H_M_max < atol_max_H
-                @test H_M_L2 < atol_L2_H
-                @test dHdvpa_M_max < atol_max_dHdvpa
-                @test dHdvpa_M_L2 < atol_L2_dHdvpa
-                @test dHdvperp_M_max < atol_max_dHdvperp
-                @test dHdvperp_M_L2 < atol_L2_dHdvperp
-                @test G_M_max < atol_max_G
-                @test G_M_L2 < atol_L2_G
-                @test d2Gdvpa2_M_max < atol_max_d2Gdvpap2
-                @test d2Gdvpa2_M_L2 < atol_L2_d2Gdvpa2
-                @test dGdvperp_M_max < atol_max_dGdvperp
-                @test dGdvperp_M_L2 < atol_L2_dGdvperp
-                @test d2Gdvperpdvpa_M_max < atol_max_d2Gdvperpdvpa
-                @test d2Gdvperpdvpa_M_L2 < atol_L2_d2Gdvperpdvpa
-                @test d2Gdvperp2_M_max < atol_max_d2Gdvperp2
-                @test d2Gdvperp2_M_L2 < atol_L2_d2Gdvperp2
+                rosenbluth_potential_solver_test(ngrid = 9, nelement_vpa = 8, nelement_vperp = 4,
+                    boundary_data_option=boundary_data_option, print_to_screen=print_to_screen)
             end
         end
 
@@ -1096,11 +1425,11 @@ function runtests()
                 nussp = 1.0
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
-                        Fs_M[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa,vperp,ivpa,ivperp)
-                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                        Fs_M[ivpa,ivperp] = F_Maxwellian(denss,upars,vths,vpa.grid[ivpa],vperp.grid[ivperp])
+                        F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
                         C_M_exact[ivpa,ivperp] = Cssp_Maxwellian_inputs(denss,upars,vths,ms,Zs,
                                                                         dens,upar,vth,msp,Zsp,
-                                                                        nussp,vpa,vperp,ivpa,ivperp)
+                                                                        nussp,vpa.grid[ivpa],vperp.grid[ivperp])
                     end
                 end
                 fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
@@ -1223,6 +1552,18 @@ function runtests()
                 atol_max = atol_max, atol_L2=atol_L2,
                 print_to_screen=print_to_screen)
         end
+        @testset "weak-form (multi-species multi-reference-speed) collision operator calculation" begin
+            println("    - test weak-form (multi-species multi-reference-speed) collision operator calculation")
+            ngrid = 9
+            nelement_vpa = 16
+            nelement_vperp = 8
+            atol_max = 5.0e-4
+            atol_L2 = 5.0e-6
+            multi_species_multi_reference_fokker_planck_collisions_test(ngrid=ngrid,
+                nelement_vpa=nelement_vpa, nelement_vperp=nelement_vperp,
+                atol_max = atol_max, atol_L2=atol_L2,
+                print_to_screen=print_to_screen)
+        end
         @testset "weak-form Rosenbluth potential calculation: direct integration" begin
             println("    - test weak-form Rosenbluth potential calculation: direct integration")
             ngrid = 5 # chosen for a quick test -- direct integration is slow!
@@ -1263,15 +1604,15 @@ function runtests()
             dens, upar, vth = 1.0, 1.0, 1.0
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
-                    F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
-                    dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa,vperp,ivpa,ivperp)
+                    F_M[ivpa,ivperp] = F_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    H_M_exact[ivpa,ivperp] = H_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    G_M_exact[ivpa,ivperp] = G_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvpa2_M_exact[ivpa,ivperp] = d2Gdvpa2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvperp2_M_exact[ivpa,ivperp] = d2Gdvperp2_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dGdvperp_M_exact[ivpa,ivperp] = dGdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    d2Gdvperpdvpa_M_exact[ivpa,ivperp] = d2Gdvperpdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dHdvpa_M_exact[ivpa,ivperp] = dHdvpa_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
+                    dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
                 end
             end
             # calculate the potentials numerically
@@ -1337,6 +1678,12 @@ function runtests()
         @testset "numerical error correcting terms" begin
             println("    - test numerical error correcting terms")
             multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [1.0, 1.0], u0ref = [0.0, 0.0], n0ref = [0.4, 3.0], atol=3.0e-13)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [1.0, 1.0], u0ref = [0.7, 1.1], n0ref = [0.4, 3.0], atol=3.0e-13)
+            multi_species_numerical_error_corrections_test(print_to_screen=print_to_screen,
+                c0ref = [0.5, 2.0], u0ref = [0.7, 1.1], n0ref = [0.4, 3.0], atol=3.0e-13)
         end
 
 
