@@ -26,10 +26,6 @@ module FokkerPlanck
 # Include submodules from other source files
 # Note that order of includes matters - things used in one module must already
 # be defined
-include("type_definitions.jl")
-include("array_allocation.jl")
-include("coordinates.jl")
-include("calculus.jl")
 include("velocity_moments.jl")
 include("fokker_planck_test.jl")
 include("fokker_planck_nonlinear_solvers.jl")
@@ -41,16 +37,14 @@ export calculate_entropy_production
 # implicit advance
 export fokker_planck_collisions_backward_euler_step!
 # fixed background plasma inputs
-export fixed_background_plasma_input
+export FixedBackgroundPlasmaInput
 # source inputs
-export slowing_down_source_data_input
+export SlowingDownSourceInput
 
 using Dates
 using LinearAlgebra: lu, ldiv!
-using ..type_definitions: mk_float, mk_int
-using ..array_allocation: allocate_float
 using ..velocity_moments: get_density, get_upar, get_pressure
-using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_planck_backward_euler_data,
+using ..fokker_planck_calculus: FokkerPlanckWeakformArrays, FokkerPlanckBackwardEulerData,
                                 fokker_planck_collision_operator_solve!,
                                 enforce_vpavperp_BCs!,
                                 calculate_rosenbluth_potentials_via_elliptic_solve!,
@@ -59,9 +53,9 @@ using ..fokker_planck_calculus: fokkerplanck_weakform_arrays_struct, fokker_plan
                                 advance_linearised_test_particle_collisions!,
                                 multipole_expansion, direct_integration, delta_f_multipole, boundary_data_type,
                                 conserving_corrections!, density_conserving_correction!,
-                                species_info, calculate_cross_species_rosenbluth_potential_sums!,
+                                SpeciesData, calculate_cross_species_rosenbluth_potential_sums!,
                                 multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species,
-                                fixed_background_plasma_input, slowing_down_source_data_input,
+                                FixedBackgroundPlasmaInput, SlowingDownSourceInput,
                                 slowing_down_source!, slowing_down_sink!, add_slowing_down_source!,
                                 convert_rosenbluth_potentials_from_source_to_other_grid!
 using ..fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperpdvpa_Maxwellian, d2Gdvperp2_Maxwellian, dHdvpa_Maxwellian, dHdvperp_Maxwellian,
@@ -91,11 +85,11 @@ with \$\\gamma_\\mathrm{ref} = 2 \\pi e^4 \\ln \\Lambda_{ii} / (4 \\pi
 \\epsilon_0)^2\$. This means that \$\\tilde{\\nu}_{ss'} = (Z_s Z_{s'})^2\\tilde{\\nu}_\\mathrm{ref}\$ and this conversion is handled explicitly in the code with the charge number input provided by the user.
 """
 function fokker_planck_collision_operator_weak_form!(
-                         CCssp::AbstractArray{mk_float,2},
-                         ffs_in::AbstractArray{mk_float,2},
-                         ffsp_in::AbstractArray{mk_float,2},
-                         ms::mk_float, msp::mk_float, nussp::mk_float,
-                         fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                         CCssp::AbstractArray{Float64,2},
+                         ffs_in::AbstractArray{Float64,2},
+                         ffsp_in::AbstractArray{Float64,2},
+                         ms::Float64, msp::Float64, nussp::Float64,
+                         fkpl_arrays::FokkerPlanckWeakformArrays;
                          use_Maxwellian_Rosenbluth_coefficients=false::Bool,
                          algebraic_solve_for_d2Gdvperp2 = false::Bool, calculate_GG=false::Bool,
                          calculate_dGdvperp=false::Bool)
@@ -127,10 +121,10 @@ function fokker_planck_collision_operator_weak_form!(
     return nothing
 end
 function fokker_planck_collision_operator_weak_form!(
-                         CCs::AbstractArray{mk_float,3},
-                         ff_in::AbstractArray{mk_float,3},
-                         nuref::mk_float,
-                         fkpl_arrays::fokkerplanck_weakform_arrays_struct;
+                         CCs::AbstractArray{Float64,3},
+                         ff_in::AbstractArray{Float64,3},
+                         nuref::Float64,
+                         fkpl_arrays::FokkerPlanckWeakformArrays;
                          use_conserving_corrections=false::Bool,
                          use_Maxwellian_Rosenbluth_coefficients=false::Bool,
                          algebraic_solve_for_d2Gdvperp2 = false::Bool, calculate_GG=false::Bool,
@@ -253,9 +247,9 @@ end
 Cross-species collisions due to fixed background plasma.
 """
 function fokker_planck_cross_species_collision_operator!(
-                        CC::AbstractArray{mk_float,2},
-                        ff_in::AbstractArray{mk_float,2},
-                        nuref::mk_float, ms::mk_float, Zs::mk_float, c0refs::mk_float, u0refs::mk_float,
+                        CC::AbstractArray{Float64,2},
+                        ff_in::AbstractArray{Float64,2},
+                        nuref::Float64, ms::Float64, Zs::Float64, c0refs::Float64, u0refs::Float64,
                         rosenbluth_potentials, rosenbluth_potentials_buffer,
                         fixed_background_plasma,
                         rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
@@ -281,9 +275,9 @@ end
 """
 Function to calculate entropy production.
 """
-function calculate_entropy_production(CC::AbstractArray{mk_float,2},
-                    pdf::AbstractArray{mk_float,2},
-                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+function calculate_entropy_production(CC::AbstractArray{Float64,2},
+                    pdf::AbstractArray{Float64,2},
+                    fkpl_arrays::FokkerPlanckWeakformArrays)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # assign dummy array
@@ -299,9 +293,9 @@ function calculate_entropy_production(CC::AbstractArray{mk_float,2},
     return dSdt
 end
 function calculate_entropy_production(
-                    CCs::AbstractArray{mk_float,3},
-                    pdf::AbstractArray{mk_float,3},
-                    fkpl_arrays::fokkerplanck_weakform_arrays_struct)
+                    CCs::AbstractArray{Float64,3},
+                    pdf::AbstractArray{Float64,3},
+                    fkpl_arrays::FokkerPlanckWeakformArrays)
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
@@ -333,9 +327,9 @@ end
 # Functions associated with implicit timestepping
 #################################################
 
-function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{mk_float,3},
-                        delta_t::mk_float, nuref::mk_float,
-                        fkpl_arrays::fokker_planck_backward_euler_data;
+function fokker_planck_collisions_backward_euler_step!(Fold::AbstractArray{Float64,3},
+                        delta_t::Float64, nuref::Float64,
+                        fkpl_arrays::FokkerPlanckBackwardEulerData;
                         use_conserving_corrections=true::Bool,
                         use_conserving_corrections_on_C=true::Bool,
                         test_linearised_advance=false::Bool,

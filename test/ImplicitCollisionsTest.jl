@@ -1,10 +1,8 @@
 using Dates
-using FokkerPlanck.array_allocation: allocate_float
-using FokkerPlanck.type_definitions: mk_float, mk_int
-using FokkerPlanck: fokker_planck_backward_euler_data,
+using FokkerPlanck: FokkerPlanckBackwardEulerData,
                     fokker_planck_collisions_backward_euler_step!,
                     fokker_planck_collision_operator_weak_form!,
-                    fokkerplanck_weakform_arrays_struct,
+                    FokkerPlanckWeakformArrays,
                     multipole_expansion, delta_f_multipole, boundary_data_type,
                     multi_species_operator_type, single_assembly_per_species, repeat_assembly_per_species
 # enum for controlling return data from test functions
@@ -17,18 +15,18 @@ end
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
 function test_implicit_collisions(;
     # initial pdf info
-    vth0=0.5::mk_float, vperp0=1.0::mk_float, vpa0=0.0::mk_float, zbeam=0.0::mk_float, nspecies=1::mk_int,
+    vth0=0.5::Float64, vperp0=1.0::Float64, vpa0=0.0::Float64, zbeam=0.0::Float64, nspecies=1::Int64,
     # grid info
-    ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
-    Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
+    ngrid=3::Int64, nelement_vpa=8::Int64, nelement_vperp=4::Int64,
+    Lvpa=6.0::Float64, Lvperp=3.0::Float64,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
-    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vpa=natural_boundary_condition::BoundaryConditionType,
+    bc_vperp=natural_boundary_condition::BoundaryConditionType,
     # time advance info
-    ntime=1::mk_int,delta_t=1.0::mk_float,
+    ntime=1::Int64,delta_t=1.0::Float64,
     # nonlinea r solver options
-    atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
-    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
+    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
+    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
     # model options
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
@@ -83,21 +81,21 @@ end
 
 function test_multispecies_implicit_collisions(;
     # initial pdf info
-    vth0=[0.5,0.5]::Vector{mk_float}, vperp0=[1.0,1.0]::Vector{mk_float}, vpa0=[0.0,0.0]::Vector{mk_float}, zbeam=[0.0,0.0]::Vector{mk_float},
+    vth0=[0.5,0.5]::Vector{Float64}, vperp0=[1.0,1.0]::Vector{Float64}, vpa0=[0.0,0.0]::Vector{Float64}, zbeam=[0.0,0.0]::Vector{Float64},
     # species info
-    mass=[1.0,1.0]::Vector{mk_float}, zeds=[1.0,1.0]::Vector{mk_float}, c0ref=[1.0,1.0]::Vector{mk_float},
-    u0ref=[0.0,0.0]::Vector{mk_float}, n0ref=[1.0,1.0]::Vector{mk_float}, density_in=[1.0,1.0]::Vector{mk_float},
+    mass=[1.0,1.0]::Vector{Float64}, zeds=[1.0,1.0]::Vector{Float64}, c0ref=[1.0,1.0]::Vector{Float64},
+    u0ref=[0.0,0.0]::Vector{Float64}, n0ref=[1.0,1.0]::Vector{Float64}, density_in=[1.0,1.0]::Vector{Float64},
     # grid info
-    ngrid=3::mk_int, nelement_vpa=8::mk_int, nelement_vperp=4::mk_int,
-    Lvpa=6.0::mk_float, Lvperp=3.0::mk_float,
+    ngrid=3::Int64, nelement_vpa=8::Int64, nelement_vperp=4::Int64,
+    Lvpa=6.0::Float64, Lvperp=3.0::Float64,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
-    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vpa=natural_boundary_condition::BoundaryConditionType,
+    bc_vperp=natural_boundary_condition::BoundaryConditionType,
     # time advance info
-    ntime=1::mk_int,delta_t=1.0::mk_float,
+    ntime=1::Int64,delta_t=1.0::Float64,
     # nonlinear solver options
-    atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
-    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
+    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
+    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
     # model options
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
@@ -126,9 +124,9 @@ function test_multispecies_implicit_collisions(;
         end
     end
     start_init_time = now()
-    # group integer inputs using `scalar_coordinate_inputs` from FokkerPlanck.coordinates
-    input_vpa_scalar = scalar_coordinate_inputs(ngrid, nelement_vpa, Lvpa)
-    input_vperp_scalar = scalar_coordinate_inputs(ngrid, nelement_vperp, Lvperp)
+    # group integer inputs using `ScalarCoordinateInputs` from FokkerPlanck.coordinates
+    input_vpa_scalar = ScalarCoordinateInputs(ngrid, nelement_vpa, -0.5*Lvpa, 0.5*Lvpa, include_boundary_points)
+    input_vperp_scalar = ScalarCoordinateInputs(ngrid, nelement_vperp, 0.0, Lvperp, exclude_lower_boundary_point)
     if test_external_chebyshev_grid
         # construct an instance of Array{ElementCoordinates,1} to use user-provided custom grid
         input_vpa = chebyshev_grid("vpa",input_vpa_scalar)
@@ -139,7 +137,7 @@ function test_multispecies_implicit_collisions(;
         input_vperp = input_vperp_scalar
     end
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
-    fkpl_arrays = fokker_planck_backward_euler_data(
+    fkpl_arrays = FokkerPlanckBackwardEulerData(
                         mass, zeds, c0ref, u0ref, n0ref,
                         input_vpa,
                         input_vperp;
@@ -157,17 +155,17 @@ function test_multispecies_implicit_collisions(;
     species = fkpl_arrays.fp_operator.species
     # arrays needed for advance
     if test_input_array_type
-        Fgeneral = allocate_float(vpa.n,vperp.n,1,1,species.n)
+        Fgeneral = Array{Float64}(undef,vpa.n,vperp.n,1,1,species.n)
         @views Fold = Fgeneral[:,:,1,1,:]
     else
-        Fold = allocate_float(vpa.n,vperp.n,species.n)
+        Fold = Array{Float64}(undef,vpa.n,vperp.n,species.n)
     end
     CC = fkpl_arrays.CCs # needed for dSdt diagnostic
     # dummy arrays needed for diagnostics
-    Fout = allocate_float(vpa.n,vperp.n,species.n,2)
-    Fdummy1 = allocate_float(vpa.n,vperp.n,species.n)
-    Fdummy2 = allocate_float(vpa.n,vperp.n)
-    Fdummy3 = allocate_float(vpa.n,vperp.n)
+    Fout = Array{Float64}(undef,vpa.n,vperp.n,species.n,2)
+    Fdummy1 = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+    Fdummy2 = Array{Float64}(undef,vpa.n,vperp.n)
+    Fdummy3 = Array{Float64}(undef,vpa.n,vperp.n)
     moments = moments_struct(species.n)
     # physics parameters
     nuss = 1.0
@@ -243,25 +241,25 @@ end
 include(joinpath(@__DIR__,"SlowingDownTestBase.jl"))
 function test_implicit_slowing_down(;
     # initial pdf info
-    vth0=[0.5]::Vector{mk_float}, vperp0=[1.0]::Vector{mk_float}, vpa0=[0.0]::Vector{mk_float}, zbeam=[0.0]::Vector{mk_float},
+    vth0=[0.5]::Vector{Float64}, vperp0=[1.0]::Vector{Float64}, vpa0=[0.0]::Vector{Float64}, zbeam=[0.0]::Vector{Float64},
     # source info
-    source_rate=[1.0]::Vector{mk_float}, source_v0=[1.0]::Vector{mk_float}, source_vth=[0.05]::Vector{mk_float}, sink_rate=[5.0]::Vector{mk_float}, sink_vth=0.05::mk_float, constant_sink=false::Bool,
+    source_rate=[1.0]::Vector{Float64}, source_v0=[1.0]::Vector{Float64}, source_vth=[0.05]::Vector{Float64}, sink_rate=[5.0]::Vector{Float64}, sink_vth=0.05::Float64, constant_sink=false::Bool,
     # species info
-    mass=[1.0]::Vector{mk_float}, zeds=[2.0]::Vector{mk_float}, c0ref=[1.0]::Vector{mk_float},
-    u0ref=[0.0]::Vector{mk_float}, n0ref=[1.0]::Vector{mk_float}, density_in=[1.0e-8]::Vector{mk_float},
+    mass=[1.0]::Vector{Float64}, zeds=[2.0]::Vector{Float64}, c0ref=[1.0]::Vector{Float64},
+    u0ref=[0.0]::Vector{Float64}, n0ref=[1.0]::Vector{Float64}, density_in=[1.0e-8]::Vector{Float64},
     # grid info
-    ngrid=5::mk_int, nelement_vpa=32::mk_int, nelement_vperp=16::mk_int,
-    Lvpa=3.0::mk_float, Lvperp=1.5::mk_float,
+    ngrid=5::Int64, nelement_vpa=32::Int64, nelement_vperp=16::Int64,
+    Lvpa=3.0::Float64, Lvperp=1.5::Float64,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::finite_element_boundary_condition_type,
-    bc_vperp=natural_boundary_condition::finite_element_boundary_condition_type,
+    bc_vpa=natural_boundary_condition::BoundaryConditionType,
+    bc_vperp=natural_boundary_condition::BoundaryConditionType,
     # time advance info
-    ntime=1::mk_int,delta_t=0.01::mk_float,
+    ntime=1::Int64,delta_t=0.01::Float64,
     # nonlinear solver options
-    atol = 1.0e-10::mk_float, rtol = 0.0::mk_float,
-    nonlinear_max_iterations = 20::mk_int, test_particle_preconditioner=true::Bool,
+    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
+    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
     # model options
-    electron_mass = 1.0/1836.0::mk_float, thermal_temperature = 0.01::mk_float,
+    electron_mass = 1.0/1836.0::Float64, thermal_temperature = 0.01::Float64,
     test_linearised_advance=false::Bool,
     use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
     test_numerical_conserving_terms=true::Bool,
@@ -285,9 +283,9 @@ function test_implicit_slowing_down(;
         end
     end
     start_init_time = now()
-    # group integer inputs using `scalar_coordinate_inputs` from FokkerPlanck.coordinates
-    input_vpa = scalar_coordinate_inputs(ngrid, nelement_vpa, Lvpa)
-    input_vperp = scalar_coordinate_inputs(ngrid, nelement_vperp, Lvperp)
+    # group integer inputs using `ScalarCoordinateInputs` from FokkerPlanck.coordinates
+    input_vpa = ScalarCoordinateInputs(ngrid, nelement_vpa, -0.5*Lvpa, 0.5*Lvpa, include_boundary_points)
+    input_vperp = ScalarCoordinateInputs(ngrid, nelement_vperp, 0.0, Lvperp, exclude_lower_boundary_point)
     # fixed background Maxwellian inputs
     # parameters of fixed background species
     msp = [0.25*electron_mass, 0.25]
@@ -296,11 +294,11 @@ function test_implicit_slowing_down(;
     uparsp = [0.0,0.0]
     temp = thermal_temperature
     vthsp = [sqrt(2.0*temp/msp[1]), sqrt(2.0*temp/msp[2])]
-    fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,denssp,uparsp,vthsp)
+    fixed_background_plasma_in = FixedBackgroundPlasmaInput(msp,Zsp,denssp,uparsp,vthsp)
     # information for sources of the evolving species
-    source_data_in = slowing_down_source_data_input(source_rate,source_vth,source_v0,sink_rate,sink_vth,constant_sink)
+    source_data_in = SlowingDownSourceInput(source_rate,source_vth,source_v0,sink_rate,sink_vth,constant_sink)
     # initialise all arrays needed to evaluate the nonlinear Fokker-Planck operator
-    fkpl_arrays = fokker_planck_backward_euler_data(
+    fkpl_arrays = FokkerPlanckBackwardEulerData(
                         mass, zeds, c0ref, u0ref, n0ref,
                         input_vpa,
                         input_vperp;
@@ -319,13 +317,13 @@ function test_implicit_slowing_down(;
     vperp = fkpl_arrays.fp_operator.vperp
     species = fkpl_arrays.fp_operator.species
     # arrays needed for advance
-    Fold = allocate_float(vpa.n,vperp.n,species.n)
+    Fold = Array{Float64}(undef,vpa.n,vperp.n,species.n)
     CC = fkpl_arrays.CCs # needed for dSdt diagnostic
     # dummy arrays needed for diagnostics
-    Fout = allocate_float(vpa.n,vperp.n,species.n,2)
-    Fdummy1 = allocate_float(vpa.n,vperp.n,species.n)
-    Fdummy2 = allocate_float(vpa.n,vperp.n)
-    Fdummy3 = allocate_float(vpa.n,vperp.n)
+    Fout = Array{Float64}(undef,vpa.n,vperp.n,species.n,2)
+    Fdummy1 = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+    Fdummy2 = Array{Float64}(undef,vpa.n,vperp.n)
+    Fdummy3 = Array{Float64}(undef,vpa.n,vperp.n)
     moments = moments_struct(species.n)
     # physics parameters
     nuref = 1.0
