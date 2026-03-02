@@ -340,10 +340,10 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     return nothing
 end
 
-function get_total_parallel_momentum(ff::AbstractArray{Float64,3},
+function get_total_parallel_momentum(ff::Tpdf,
     vpa::FiniteElementCoordinate,
     vperp::FiniteElementCoordinate,
-    species::SpeciesData)
+    species::SpeciesData) where Tpdf <: AbstractArray{Float64,3}
     parallel_momentum = 0.0
     for is in 1:species.n
         @views gamma = species.n0ref[is]*(species.c0ref[is]*get_upar(ff[:,:,is],vpa,vperp,1.0)
@@ -353,10 +353,10 @@ function get_total_parallel_momentum(ff::AbstractArray{Float64,3},
     return parallel_momentum
 end
 
-function get_total_energy(ff::AbstractArray{Float64,3},
+function get_total_energy(ff::Tpdf,
     vpa::FiniteElementCoordinate,
     vperp::FiniteElementCoordinate,
-    species::SpeciesData)
+    species::SpeciesData) where Tpdf <: AbstractArray{Float64,3}
     energy = 0.0
     for is in 1:species.n
         @views energy += ((species.n0ref[is]*species.c0ref[is]^2)*

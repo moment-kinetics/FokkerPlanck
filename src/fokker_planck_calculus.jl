@@ -389,21 +389,22 @@ struct CollisionOperatorArrays
 end
 
 
-struct AssembledSparseMatrixOperators
+struct AssembledSparseMatrixOperators{TFloat<:Float64,
+        TSparseMatrix <: AbstractSparseArray{TFloat,Int64,2}}
     # assembled 2D weak-form matrices
-    MM2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    KKpar2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    KKperp2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    KKpar2D_with_BC_terms_sparse::AbstractSparseArray{Float64,Int64,2}
-    KKperp2D_with_BC_terms_sparse::AbstractSparseArray{Float64,Int64,2}
-    LP2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    LV2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    LB2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    PUperp2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    PPparPUperp2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    PPpar2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    MMparMNperp2D_sparse::AbstractSparseArray{Float64,Int64,2}
-    KPperp2D_sparse::AbstractSparseArray{Float64,Int64,2}
+    MM2D_sparse::TSparseMatrix
+    KKpar2D_sparse::TSparseMatrix
+    KKperp2D_sparse::TSparseMatrix
+    KKpar2D_with_BC_terms_sparse::TSparseMatrix
+    KKperp2D_with_BC_terms_sparse::TSparseMatrix
+    LP2D_sparse::TSparseMatrix
+    LV2D_sparse::TSparseMatrix
+    LB2D_sparse::TSparseMatrix
+    PUperp2D_sparse::TSparseMatrix
+    PPparPUperp2D_sparse::TSparseMatrix
+    PPpar2D_sparse::TSparseMatrix
+    MMparMNperp2D_sparse::TSparseMatrix
+    KPperp2D_sparse::TSparseMatrix
     # lu decomposition objects
     lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64}
     lu_obj_LP::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64}
@@ -519,7 +520,7 @@ struct AssembledSparseMatrixOperators
         S_dummy = Array{Float64}(undef,vpa.n,vperp.n)
         Q_dummy = Array{Float64}(undef,vpa.n,vperp.n)
         rhsvpavperp = Array{Float64}(undef,vpa.n,vperp.n)
-        return new(MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
+        return new{Float64,typeof(MM2D_sparse)}(MM2D_sparse,KKpar2D_sparse,KKperp2D_sparse,
                     KKpar2D_with_BC_terms_sparse,KKperp2D_with_BC_terms_sparse,
                     LP2D_sparse,LV2D_sparse,LB2D_sparse,PUperp2D_sparse,PPparPUperp2D_sparse,
                     PPpar2D_sparse,MMparMNperp2D_sparse,KPperp2D_sparse,
@@ -660,23 +661,23 @@ struct PdfMoments
 end
 """
 """
-struct FixedBackgroundPlasmaInput
+struct FixedBackgroundPlasmaInput{Tpdf <: Union{PdfMoments,AbstractArray{Float64,3}}}
     species::SpeciesData
-    pdf::Union{PdfMoments,AbstractArray{Float64,3}}
-    function FixedBackgroundPlasmaInput(mass::Vector{Float64},
-                                    zeds::Vector{Float64},
-                                    pdf::Union{PdfMoments,AbstractArray{Float64,3}})
-        species = SpeciesData(mass,zeds)
-        return new(species,pdf)
-    end
+    pdf::Tpdf
     function FixedBackgroundPlasmaInput(mass::Vector{Float64},
                                     zeds::Vector{Float64},
                                     density::Vector{Float64},
                                     upar::Vector{Float64},
                                     vth::Vector{Float64})
-        species = SpeciesData(mass,zeds)
         pdf = PdfMoments(density,upar,vth)
-        return new(species,pdf)
+        return FixedBackgroundPlasmaInput(mass,zeds,pdf)
+    end
+    function FixedBackgroundPlasmaInput(mass::Vector{Float64},
+                zeds::Vector{Float64},
+                pdf::Union{PdfMoments,Tpdf}
+                ) where Tpdf <: AbstractArray{Float64,3}
+        species = SpeciesData(mass,zeds)
+        return new{typeof(pdf)}(species,pdf)
     end
 end
 """
@@ -686,18 +687,15 @@ struct FixedBackgroundPlasmaData
     rosenbluth_potentials_s::Vector{RosenbluthPotentialData}
     # internal constructor for Maxwellian background plasma species
     function FixedBackgroundPlasmaData(fixed_background_plasma_in::FixedBackgroundPlasmaInput,
-                                    vpa::FiniteElementCoordinate,
-                                    vperp::FiniteElementCoordinate,
-                                    fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData)
+            vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate,
+            fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData)
         species = fixed_background_plasma_in.species
         pdf = fixed_background_plasma_in.pdf
         return FixedBackgroundPlasmaData(species, pdf, vpa, vperp, fprp_solver_data)
     end
-    function FixedBackgroundPlasmaData(species::SpeciesData,
-                                    pdf::PdfMoments,
-                                    vpa::FiniteElementCoordinate,
-                                    vperp::FiniteElementCoordinate,
-                                    fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData)
+    function FixedBackgroundPlasmaData(species::SpeciesData, pdf::PdfMoments,
+                vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate,
+                fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData)
         density = pdf.density
         upar = pdf.upar
         vth = pdf.vth
@@ -716,11 +714,10 @@ struct FixedBackgroundPlasmaData
         return new(species, rosenbluth_potentials_s)
     end
     # internal constructor for non-Maxwellian background plasma species
-    function FixedBackgroundPlasmaData(species::SpeciesData,
-                                    pdf::AbstractArray{Float64,3},
-                                    vpa::FiniteElementCoordinate,
-                                    vperp::FiniteElementCoordinate,
-                                    fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData)
+    function FixedBackgroundPlasmaData(species::SpeciesData, pdf::Tpdf,
+                vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate,
+                fprp_solver_data::FokkerPlanckRosenbluthPotentialSolverData
+                ) where Tpdf <: AbstractArray{Float64,3}
         @boundscheck (species.n == size(pdf,3) && vperp.n == size(pdf,2) && vpa.n == size(pdf,1)) || throw(BoundsError(pdf))
         rosenbluth_potentials_s = Vector{RosenbluthPotentialData}(undef,species.n)
         for is in 1:species.n
@@ -784,12 +781,12 @@ struct FokkerPlanckWeakformArrays
     in the rest of the velocity space domain.
     """
     function FokkerPlanckWeakformArrays(vpa::FiniteElementCoordinate,
-                                                vperp::FiniteElementCoordinate,
-                                                species::SpeciesData,
-                                                boundary_data_option::boundary_data_type;
-                                                multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-                                                print_to_screen=true::Bool,
-                                                fixed_background_plasma_in=nothing::Union{FixedBackgroundPlasmaInput,Nothing})
+                vperp::FiniteElementCoordinate,
+                species::SpeciesData,
+                boundary_data_option::boundary_data_type;
+                multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
+                print_to_screen=true::Bool,
+                fixed_background_plasma_in=nothing::Union{FixedBackgroundPlasmaInput,Nothing})
         YY_arrays = CollisionOperatorArrays(vpa,vperp)
         fprp_solver_data = FokkerPlanckRosenbluthPotentialSolverData(vpa,vperp,
                                 YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
@@ -817,11 +814,11 @@ struct FokkerPlanckWeakformArrays
         correction_coeffs_z = Array{Float64}(undef,3,nspecies,nspecies)
         delta_pdf = Array{Float64}(undef,nvpa,nvperp,nspecies)
         # Rosenbluth potentials and species info for unevolved species
-        if typeof(fixed_background_plasma_in) == FixedBackgroundPlasmaInput
+        if typeof(fixed_background_plasma_in) == Nothing
+            fixed_background_plasma = nothing
+        else
             fixed_background_plasma = FixedBackgroundPlasmaData(fixed_background_plasma_in,
                                             vpa,vperp,fprp_solver_data)
-        else
-            fixed_background_plasma = nothing
         end
         return new(vpa, vperp, species, fprp_solver_data, YY_arrays,
                     rosenbluth_potentials_s, rosenbluth_potentials,
@@ -872,8 +869,9 @@ struct SlowingDownSourceData
         return new(sink_func, source_input)
     end
 end
-function slowing_down_source!(source::AbstractArray{Float64,3},
-    fkpl_arrays::FokkerPlanckWeakformArrays, source_data::SlowingDownSourceData)
+function slowing_down_source!(source::Tpdf,
+    fkpl_arrays::FokkerPlanckWeakformArrays, source_data::SlowingDownSourceData
+    ) where Tpdf <: AbstractArray{Float64,3}
     # extract variables for source
     source_rate = source_data.source_input.source_rate
     source_vth = source_data.source_input.source_vth
@@ -896,10 +894,10 @@ function slowing_down_source!(source::AbstractArray{Float64,3},
     end
     return nothing
 end
-function slowing_down_sink!(source::AbstractArray{Float64,3},
-    pdf::AbstractArray{Float64,3},
+function slowing_down_sink!(source::Tpdf1, pdf::Tpdf2,
     fkpl_arrays::FokkerPlanckWeakformArrays,
-    source_data::SlowingDownSourceData)
+    source_data::SlowingDownSourceData
+    ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     # extract variables for sink of alphas
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -957,34 +955,37 @@ function slowing_down_sink!(source::AbstractArray{Float64,3},
     end
     return nothing
 end
-function slowing_down_source!(source::AbstractArray{Float64,3},
-    fkpl_arrays::FokkerPlanckWeakformArrays, source_data::Nothing)
+function slowing_down_source!(source::Tpdf,
+    fkpl_arrays::FokkerPlanckWeakformArrays, source_data::Nothing
+    ) where Tpdf <: AbstractArray{Float64,3}
     # do nothing
     return nothing
 end
-function slowing_down_sink!(source::AbstractArray{Float64,3},
-    pdf::AbstractArray{Float64,3},
-    fkpl_arrays::FokkerPlanckWeakformArrays,
-    source_data::Nothing)
+function slowing_down_sink!(source::Tpdf1, pdf::Tpdf2,
+    fkpl_arrays::FokkerPlanckWeakformArrays, source_data::Nothing
+    ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     # do nothing
     return nothing
 end
-function add_slowing_down_source!(Fnew::AbstractArray{Float64,3},
-    Fdummy::AbstractArray{Float64,3}, fkpl_arrays::FokkerPlanckWeakformArrays,
-    source_data::SlowingDownSourceData, delta_t::Float64)
+function add_slowing_down_source!(Fnew::Tpdf1,
+    Fdummy::Tpdf2, fkpl_arrays::FokkerPlanckWeakformArrays,
+    source_data::SlowingDownSourceData, delta_t::Float64
+    ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     @. Fdummy = 0.0 # set dummy to zero before adding source
     slowing_down_source!(Fdummy, fkpl_arrays, source_data)
     @. Fnew += delta_t*Fdummy
     return nothing
 end
-function add_slowing_down_source!(Fnew::AbstractArray{Float64,3},
-    Fdummy::AbstractArray{Float64,3}, fkpl_arrays::FokkerPlanckWeakformArrays,
-    source_data::Nothing, delta_t::Float64)
+function add_slowing_down_source!(Fnew::Tpdf1,
+    Fdummy::Tpdf2, fkpl_arrays::FokkerPlanckWeakformArrays,
+    source_data::Nothing, delta_t::Float64
+    ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     # do nothing
     return nothing
 end
 
-struct FokkerPlanckBackwardEulerData
+struct FokkerPlanckBackwardEulerData{TFloat<:Float64,
+        TSparseMatrix <: AbstractSparseArray{TFloat,Int64,2}}
     # arrays for storing collision operator computed
     # when iterating in the backward Euler step
     CCs::Array{Float64,3}
@@ -992,7 +993,7 @@ struct FokkerPlanckBackwardEulerData
     source::Array{Float64,3}
     # matrices for storing preconditioner
     # based on I - dt * C[delta F, F]
-    CC2D_sparse::AbstractSparseArray{Float64,Int64,2}
+    CC2D_sparse::TSparseMatrix
     lu_obj_CC2D::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64}
     lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},1}
     # dummy arrays for Jacobian-Free-Newton-Krylov solver
@@ -1095,7 +1096,7 @@ struct FokkerPlanckBackwardEulerData
         else
             source_data = nothing
         end
-        return new(CCs,source,
+        return new{Float64,typeof(CC2D_sparse)}(CCs,source,
             CC2D_sparse,lu_obj_CC2D,
             lu_objs_CC2D,
             nl_solver_data_s,
@@ -1815,9 +1816,8 @@ Function to assign precomputed (exact) data to an instance
 of `VpaVperpBoundaryData`. Used in testing.
 """
 function assign_exact_boundary_data!(func_data::VpaVperpBoundaryData,
-                                        func_exact::AbstractArray{Float64,2},
-                                        vpa::FiniteElementCoordinate,
-                                        vperp::FiniteElementCoordinate)
+            func_exact::Tpdf, vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate
+            ) where Tpdf <: AbstractArray{Float64,2}
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds begin
@@ -1859,10 +1859,9 @@ The result is stored in an instance of `VpaVperpBoundaryData`.
 Used in testing.
 """
 function calculate_boundary_data!(func_data::VpaVperpBoundaryData,
-                                  weight::Array{Float64,4},
-                                  func_input::AbstractArray{Float64,2},
-                                  vpa::FiniteElementCoordinate,
-                                  vperp::FiniteElementCoordinate)
+            weight::Array{Float64,4}, func_input::Tpdf,
+            vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate
+            ) where Tpdf <: AbstractArray{Float64,2}
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
@@ -1894,10 +1893,9 @@ using the precomputed integration weights with dimension 3.
 The result is stored in an instance of `VpaVperpBoundaryData`.
 """
 function calculate_boundary_data!(func_data::VpaVperpBoundaryData,
-                                  weight::BoundaryIntegrationWeights,
-                                  func_input::AbstractArray{Float64,2},
-                                  vpa::FiniteElementCoordinate,
-                                  vperp::FiniteElementCoordinate)
+            weight::BoundaryIntegrationWeights, func_input::Tpdf,
+            vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate
+            ) where Tpdf <: AbstractArray{Float64,2}
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
@@ -1930,8 +1928,9 @@ without allocation.
 """
 function calculate_rosenbluth_potential_boundary_data!(rpbd::RosenbluthPotentialBoundaryData,
     fkpl::Union{FokkerPlanckArraysDirectIntegration,FokkerPlanckBoundaryIntegration},
-    pdf::AbstractArray{Float64,2},vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate;
-    calculate_GG=false,calculate_dGdvperp=false)
+    pdf::Tpdf,vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate;
+    calculate_GG=false,calculate_dGdvperp=false
+    ) where Tpdf <: AbstractArray{Float64,2}
     # get derivatives of pdf
     dfdvperp = fkpl.dfdvperp
     dfdvpa = fkpl.dfdvpa
@@ -1998,7 +1997,8 @@ function rosenbluth_potential_Maxwellian(label::d2Gdvpa2Label,dens::Float64,upar
     return d2Gdvpa2_Maxwellian(dens,upar,vth,vpa,vperp)
 end
 
-function multipole_series(label::AbstractRosenbluthPotentialLabel,vpa::Float64,vperp::Float64,expansion_data::DeltaFMultipoleMoments)
+function multipole_series(label::Tlabel,vpa::Float64,vperp::Float64,expansion_data::DeltaFMultipoleMoments
+    ) where Tlabel <: AbstractRosenbluthPotentialLabel
     (dens, upar, vth) = expansion_data.Maxwellian_moments
     Inm_vec = expansion_data.Inm_vec
     series =  multipole_series(label,vpa,vperp,Inm_vec)
@@ -2297,10 +2297,11 @@ end
 """
 """
 function calculate_boundary_data_multipole!(func_data::VpaVperpBoundaryData,
-                                            label::AbstractRosenbluthPotentialLabel,
-                                            vpa::FiniteElementCoordinate,
-                                            vperp::FiniteElementCoordinate,
-                                            Inm_vec::Union{Vector{Float64},DeltaFMultipoleMoments})
+            label::Tlabel,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate,
+            Inm_vec::Union{Vector{Float64},DeltaFMultipoleMoments}
+            ) where Tlabel <: AbstractRosenbluthPotentialLabel
     nvpa = vpa.n
     nvperp = vperp.n
     @inbounds for ivperp in 1:vperp.n
@@ -2313,8 +2314,9 @@ function calculate_boundary_data_multipole!(func_data::VpaVperpBoundaryData,
     return nothing
 end
 
-function calculate_multipole_expansion_moments!(Inm_vec::Vector{Float64},pdf::AbstractArray{Float64,2},
-            vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate)
+function calculate_multipole_expansion_moments!(Inm_vec::Vector{Float64},pdf::Tpdf,
+            vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate
+            ) where Tpdf <: AbstractArray{Float64,2}
     @inbounds begin
         # get required moments of pdf for the multipole expansion
         I00 = get_nm_moment(0, 0, pdf, vpa, vperp)
@@ -2356,8 +2358,9 @@ function calculate_multipole_expansion_moments!(Inm_vec::Vector{Float64},pdf::Ab
     return nothing
 end
 function calculate_multipole_expansion_moments!(expansion_data::DeltaFMultipoleMoments,
-            pdf::AbstractArray{Float64,2},dummy_vpavperp::AbstractArray{Float64,2},
-            vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate)
+            pdf::Tpdf,dummy_vpavperp::Array{Float64,2},
+            vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate
+            ) where Tpdf <: AbstractArray{Float64,2}
     Inm_vec = expansion_data.Inm_vec
     Maxwellian_moments = expansion_data.Maxwellian_moments
     dens = get_density(pdf, vpa, vperp)
@@ -2405,9 +2408,9 @@ function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::Rosenblut
     return nothing
 end
 function calculate_rosenbluth_potential_boundary_data_multipole!(rpbd::RosenbluthPotentialBoundaryData,
-    Inm_vec::Vector{Float64},pdf::AbstractArray{Float64,2},
+    Inm_vec::Vector{Float64},pdf::Tpdf,
     vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate;
-    calculate_GG=false,calculate_dGdvperp=false)
+    calculate_GG=false,calculate_dGdvperp=false) where Tpdf <: AbstractArray{Float64,2}
     # get required moments of pdf
     calculate_multipole_expansion_moments!(Inm_vec,pdf,vpa,vperp)
     # evaluate the multipole formulae
@@ -2424,9 +2427,9 @@ a Maxwellian, and the multipole expansion for the remainder.
 """
 function calculate_rosenbluth_potential_boundary_data_delta_f_multipole!(rpbd::RosenbluthPotentialBoundaryData,
     expansion_data::DeltaFMultipoleMoments,
-    pdf::AbstractArray{Float64,2},dummy_vpavperp::AbstractArray{Float64,2},
+    pdf::Tpdf,dummy_vpavperp::Array{Float64,2},
     vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate;
-    calculate_GG=false,calculate_dGdvperp=false)
+    calculate_GG=false,calculate_dGdvperp=false) where Tpdf <: AbstractArray{Float64,2}
     # get required moments of pdf
     calculate_multipole_expansion_moments!(expansion_data,pdf,dummy_vpavperp,vpa,vperp)
     # now pass the delta f Inm to the multipole function
@@ -2464,12 +2467,10 @@ Function to compute the maximum error \${\\rm MAX}|f_{\\rm numerical}-f_{\\rm ex
 instances of `VpaVperpBoundaryData`.
 """
 function test_boundary_data(func::VpaVperpBoundaryData,
-                    func_exact::VpaVperpBoundaryData,func_name::String,
-                    vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
-                    buffer_vpa::AbstractArray{Float64,1},
-                    buffer_vperp_1::AbstractArray{Float64,1},
-                    buffer_vperp_2::AbstractArray{Float64,1},
-                    print_to_screen::Bool)
+            func_exact::VpaVperpBoundaryData,func_name::String,
+            vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
+            buffer_vpa::Tvector, buffer_vperp_1::Tvector, buffer_vperp_2::Tvector,
+            print_to_screen::Bool) where Tvector <: AbstractArray{Float64,1}
     nvpa = vpa.n
     nvperp = vperp.n
     for ivperp in 1:nvperp
@@ -2496,10 +2497,10 @@ end
 Sets `f(vpa,vperp)` to a specied value `f_bc` at the boundaries
 in `(vpa,vperp)`. `f_bc` is an instance of `VpaVperpBoundaryData`.
 """
-function enforce_dirichlet_bc!(fvpavperp::AbstractArray{Float64,2},
-                        vpa::FiniteElementCoordinate,
-                        vperp::FiniteElementCoordinate,
-                        f_bc::VpaVperpBoundaryData)
+function enforce_dirichlet_bc!(fvpavperp::Tpdf,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate,
+            f_bc::VpaVperpBoundaryData) where Tpdf <: AbstractArray{Float64,2}
     # lower vpa boundary
     for ivperp ∈ 1:vperp.n
         fvpavperp[1,ivperp] = f_bc.lower_boundary_vpa[ivperp]
@@ -2528,12 +2529,12 @@ function allocate_preconditioner_matrix(vpa::FiniteElementCoordinate,
     return CC2D_sparse, lu_obj_CC2D
 end
 
-function calculate_test_particle_preconditioner!(pdf::AbstractArray{Float64,2},
+function calculate_test_particle_preconditioner!(pdf::Tpdf,
     delta_t::Float64,ms::Float64,msp::Float64,nussp::Float64,
     fkpl_arrays::FokkerPlanckBackwardEulerData;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
-    calculate_dGdvperp=false)
+    calculate_dGdvperp=false) where Tpdf <: AbstractArray{Float64,2}
 
     CC2D_sparse = fkpl_arrays.CC2D_sparse
     fp_operator = fkpl_arrays.fp_operator
@@ -2557,12 +2558,12 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{Float64,2},
     lu!(fkpl_arrays.lu_obj_CC2D, fkpl_arrays.CC2D_sparse)
     return nothing
 end
-function calculate_test_particle_preconditioner!(pdf::AbstractArray{Float64,3},
+function calculate_test_particle_preconditioner!(pdf::Tpdf,
     delta_t::Float64,nuref::Float64,
     fkpl_arrays::FokkerPlanckBackwardEulerData;
     use_Maxwellian_Rosenbluth_coefficients=false,
     algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
-    calculate_dGdvperp=false)
+    calculate_dGdvperp=false) where Tpdf <: AbstractArray{Float64,3}
 
     CC2D_sparse = fkpl_arrays.CC2D_sparse
     fp_operator = fkpl_arrays.fp_operator
@@ -2609,9 +2610,10 @@ function calculate_test_particle_preconditioner!(pdf::AbstractArray{Float64,3},
     end
     return nothing
 end
-function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse::AbstractSparseArray{Float64,Int64,2},
+function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse::TSparseMatrix,
     rosenbluth_potentials::RosenbluthPotentialData,source_data::Union{SlowingDownSourceData,Nothing},
-    delta_t::Float64,nuref::Float64,fkpl_arrays::FokkerPlanckWeakformArrays,is::Int64)
+    delta_t::Float64,nuref::Float64,fkpl_arrays::FokkerPlanckWeakformArrays,is::Int64
+    ) where TSparseMatrix <: AbstractSparseArray{Float64,Int64,2}
     # extract structs from fkpl_arrays
     # we do not extract the potentials from fkpl_arrays to permit flexibility
     # but pass this information by argument
@@ -2695,8 +2697,9 @@ function assemble_collision_operator_preconditioner_rhs!(CC2D_sparse::AbstractSp
     return nothing
 end
 
-function advance_linearised_test_particle_collisions!(pdf::AbstractArray{Float64,2},
-                                    fkpl_arrays::FokkerPlanckBackwardEulerData)
+function advance_linearised_test_particle_collisions!(
+        pdf::Tpdf, fkpl_arrays::FokkerPlanckBackwardEulerData
+        ) where Tpdf <: AbstractArray{Float64,2}
     # (the LU decomposition object for)
     # the backward Euler time advance matrix
     # for linearised test particle collisions K * dF = C[dF, F^n+1].
@@ -2706,9 +2709,10 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{Float64
     advance_linearised_test_particle_collisions!(pdf,fkpl_arrays.fp_operator,lu_CC)
     return nothing
 end
-function advance_linearised_test_particle_collisions!(pdf::AbstractArray{Float64,2},
-                                    fkpl_arrays::FokkerPlanckWeakformArrays,
-                                    lu_CC::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64})
+function advance_linearised_test_particle_collisions!(
+            pdf::Tpdf, fkpl_arrays::FokkerPlanckWeakformArrays,
+            lu_CC::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64}
+            ) where Tpdf <: AbstractArray{Float64,2}
     # lu_CC (the LU decomposition object for)
     # the backward Euler time advance matrix
     # for linearised test particle collisions K * dF = C[dF, F^n+1].
@@ -2735,8 +2739,9 @@ function advance_linearised_test_particle_collisions!(pdf::AbstractArray{Float64
     ldiv!(pdf_c,lu_CC,pdf_dummy_c)
     return nothing
 end
-function advance_linearised_test_particle_collisions!(pdf::AbstractArray{Float64,3},
-                                    fkpl_arrays::FokkerPlanckBackwardEulerData)
+function advance_linearised_test_particle_collisions!(
+            pdf::Tpdf, fkpl_arrays::FokkerPlanckBackwardEulerData
+            ) where Tpdf <: AbstractArray{Float64,3}
     # (the vector of LU decomposition objects for)
     # the backward Euler time advance matrix
     # for multi-species linearised test particle collisions K * dF = C[dF, F^n+1].
@@ -2756,10 +2761,12 @@ in weak form. Once the array `rhsvpavperp` contains the assembled weak-form coll
 a mass matrix solve still must be carried out to find the time derivative of the distribution function
 due to collisions.
 """
-function assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp::AbstractArray{Float64,2},pdfs::AbstractArray{Float64,2},
+function assemble_explicit_collision_operator_rhs_serial!(
+    rhsvpavperp::Array{Float64,2},pdfs::Tpdf,
     rosenbluth_potentials_sp::RosenbluthPotentialData,ms::Float64,msp::Float64,nussp::Float64,
     vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
-    YY_arrays::CollisionOperatorArrays)
+    YY_arrays::CollisionOperatorArrays
+    ) where Tpdf <: AbstractArray{Float64,2}
     d2Gspdvpa2 = rosenbluth_potentials_sp.d2Gdvpa2
     d2Gspdvperpdvpa = rosenbluth_potentials_sp.d2Gdvperpdvpa
     d2Gspdvperp2 = rosenbluth_potentials_sp.d2Gdvperp2
@@ -2850,12 +2857,14 @@ Note: all variants of `elliptic_solve!()` run only in serial. They do not handle
 shared-memory parallelism themselves. The calling site must ensure that
 `elliptic_solve!()` is only called by one process in a shared-memory block.
 """
-function elliptic_solve!(field::AbstractArray{Float64,2},source::Tpdf,
+function elliptic_solve!(field::Tpdf1,source::Tpdf2,
             boundary_data::VpaVperpBoundaryData,
             lu_object_lhs::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},
-            matrix_rhs::AbstractSparseArray{Float64,Int64,2},rhsvpavperp::Tpdf,
+            matrix_rhs::TSparseMatrix,rhsvpavperp::Tpdf2,
             vpa::FiniteElementCoordinate,
-            vperp::FiniteElementCoordinate) where Tpdf <: AbstractArray{Float64,2}
+            vperp::FiniteElementCoordinate) where {Tpdf1 <: AbstractArray{Float64,2},
+                Tpdf2 <: AbstractArray{Float64,2},
+                TSparseMatrix <: AbstractSparseArray{Float64,Int64,2}}
     @inbounds begin
         # assemble the rhs of the weak system
 
@@ -2874,13 +2883,15 @@ function elliptic_solve!(field::AbstractArray{Float64,2},source::Tpdf,
 end
 # same as above but source is made of two different terms
 # with different weak matrices
-function elliptic_solve!(field::AbstractArray{Float64,2},source_1::Tpdf,source_2::Tpdf,
+function elliptic_solve!(field::Tpdf1,source_1::Tpdf2,source_2::Tpdf2,
             boundary_data::VpaVperpBoundaryData,
             lu_object_lhs::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},
-            matrix_rhs_1::AbstractSparseArray{Float64,Int64,2},
-            matrix_rhs_2::AbstractSparseArray{Float64,Int64,2},
-            rhs::Tpdf,vpa::FiniteElementCoordinate,
-            vperp::FiniteElementCoordinate) where Tpdf <: AbstractArray{Float64,2}
+            matrix_rhs_1::TSparseMatrix, matrix_rhs_2::TSparseMatrix,
+            rhs::Tpdf2,vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate
+            ) where {Tpdf1 <: AbstractArray{Float64,2},
+                Tpdf2 <: AbstractArray{Float64,2},
+                TSparseMatrix <: AbstractSparseArray{Float64,Int64,2}}
 
     @inbounds begin
         # assemble the rhs of the weak system
@@ -2919,10 +2930,10 @@ called by one process in a shared-memory block.
 function algebraic_solve!(field::Tpdf,source_1::Tpdf,source_2::Tpdf,
             boundary_data::VpaVperpBoundaryData,
             lu_object_lhs::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},
-            matrix_rhs_1::AbstractSparseArray{Float64,Int64,2},
-            matrix_rhs_2::AbstractSparseArray{Float64,Int64,2},
+            matrix_rhs_1::TSparseMatrix, matrix_rhs_2::TSparseMatrix,
             rhs::Tpdf,vpa::FiniteElementCoordinate,
-            vperp::FiniteElementCoordinate) where Tpdf <: AbstractArray{Float64,2}
+            vperp::FiniteElementCoordinate
+            ) where {Tpdf <: AbstractArray{Float64,2}, TSparseMatrix <: AbstractSparseArray{Float64,Int64,2}}
 
     @inbounds begin
         # assemble the rhs of the weak system
@@ -2956,11 +2967,11 @@ of the domain. We use the sparse LU decomposition from the LinearAlgebra package
 to solve the PDE matrix equations.
 """
 function calculate_rosenbluth_potentials_via_elliptic_solve!(
-             rosenbluth_potentials::RosenbluthPotentialData,ffsp_in::AbstractArray{Float64,2},
+             rosenbluth_potentials::RosenbluthPotentialData,ffsp_in::Tpdf,
              vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
              fkpl_arrays::FokkerPlanckRosenbluthPotentialSolverData;
              algebraic_solve_for_d2Gdvperp2=false,calculate_GG=false,
-             calculate_dGdvperp=false)
+             calculate_dGdvperp=false) where Tpdf <: AbstractArray{Float64,2}
     GG = rosenbluth_potentials.GG
     HH = rosenbluth_potentials.HH
     dHdvpa = rosenbluth_potentials.dHdvpa
@@ -3085,12 +3096,13 @@ Function to calculate Rosenbluth potentials in the entire
 domain of `(vpa,vperp)` by direct integration.
 """
 
-function calculate_rosenbluth_potentials_via_direct_integration!(GG::Tpdf,
-             HH::Tpdf,dHdvpa::Tpdf,dHdvperp::Tpdf,
-             d2Gdvpa2::Tpdf,dGdvperp::Tpdf,d2Gdvperpdvpa::Tpdf,d2Gdvperp2::Tpdf,
-             ffsp_in::AbstractArray{Float64,2},
+function calculate_rosenbluth_potentials_via_direct_integration!(GG::Tpdf1,
+             HH::Tpdf1,dHdvpa::Tpdf1,dHdvperp::Tpdf1,
+             d2Gdvpa2::Tpdf1,dGdvperp::Tpdf1,d2Gdvperpdvpa::Tpdf1,d2Gdvperp2::Tpdf1,
+             ffsp_in::Tpdf2,
              vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
-             fkpl_arrays::FokkerPlanckArraysDirectIntegration) where Tpdf <: AbstractArray{Float64,2}
+             fkpl_arrays::FokkerPlanckArraysDirectIntegration
+             ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     dfdvpa = fkpl_arrays.dfdvpa
     dfdvperp = fkpl_arrays.dfdvperp
     d2fdvperpdvpa = fkpl_arrays.d2fdvperpdvpa
@@ -3123,8 +3135,8 @@ using an analytical specification
 """
 function calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
     rosenbluth_potentials::RosenbluthPotentialData,
-    ffsp_in::AbstractArray{Float64,2},vpa::FiniteElementCoordinate,
-    vperp::FiniteElementCoordinate,mass::Float64)
+    ffsp_in::Tpdf,vpa::FiniteElementCoordinate,
+    vperp::FiniteElementCoordinate,mass::Float64) where Tpdf <: AbstractArray{Float64,2}
     dens = get_density(ffsp_in, vpa, vperp)
     upar = get_upar(ffsp_in, vpa, vperp, dens)
     pressure = get_pressure(ffsp_in, vpa, vperp, upar, mass)
@@ -3284,9 +3296,9 @@ Function to enforce non-natural boundary conditions on the collision operator
 result to be consistent with the boundary conditions imposed on the
 distribution function.
 """
-function enforce_vpavperp_BCs!(pdf::AbstractArray{Float64,2},
-                            vpa::FiniteElementCoordinate,
-                            vperp::FiniteElementCoordinate)
+function enforce_vpavperp_BCs!(pdf::Tpdf,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate) where Tpdf <: AbstractArray{Float64,2}
     nvpa = vpa.n
     nvperp = vperp.n
     # vpa non-natural boundary conditions
@@ -3443,11 +3455,10 @@ with `ci = sqrt(Ti/mi)`, `ce = sqrt(Te/mi)`
 `scalefac = ci / ce` is the ratio of the
 two reference speeds.
 """
-function interpolate_2D_vspace!(pdf_out::AbstractArray{Float64,2},
-                            pdf_in::AbstractArray{Float64,2},
-                            vpa::FiniteElementCoordinate,
-                            vperp::FiniteElementCoordinate,
-                            scalefac::Float64)
+function interpolate_2D_vspace!(pdf_out::Tpdf, pdf_in::Tpdf,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate,
+            scalefac::Float64) where Tpdf <: AbstractArray{Float64,2}
 
     # loop over points in the output interpolated dataset
     @inbounds for ivperp in 1:vperp.n
@@ -3484,9 +3495,9 @@ function interpolate_2D_vspace!(pdf_out::AbstractArray{Float64,2},
     return nothing
 end
 
-function interpolate_2D(vpa_lpoly_data::LagrangePolyData,vpa_igrid_full::AbstractArray{Int64,1},vpa_ngrid::Int64,vpa_val::Float64,
-            vperp_lpoly_data::LagrangePolyData,vperp_igrid_full::AbstractArray{Int64,1},vperp_ngrid::Int64,vperp_val::Float64,
-            pdf_in::AbstractArray{Float64,2})
+function interpolate_2D(vpa_lpoly_data::LagrangePolyData,vpa_igrid_full::Tvector,vpa_ngrid::Int64,vpa_val::Float64,
+            vperp_lpoly_data::LagrangePolyData,vperp_igrid_full::Tvector,vperp_ngrid::Int64,vperp_val::Float64,
+            pdf_in::Tpdf) where {Tvector <: AbstractArray{Int64,1}, Tpdf <: AbstractArray{Float64,2}}
     result = 0.0
     for ivperpgrid in 1:vperp_ngrid
         # index for referencing pdf_in on orginal grid
@@ -3631,15 +3642,16 @@ end
 function vperp_s(vperp_sp::Float64,c0refs::Float64,c0refsp::Float64)
     return c0refsp*vperp_sp/c0refs
 end
-function rosenbluth_potential_to_other_grid!(label::AbstractRosenbluthPotentialLabel,
-    rosenbluth_potential_other_grid::AbstractArray{Float64,2},
-    rosenbluth_potential_source_grid::AbstractArray{Float64,2},
+function rosenbluth_potential_to_other_grid!(label::Tlabel,
+    rosenbluth_potential_other_grid::Tpdf,
+    rosenbluth_potential_source_grid::Tpdf,
     expansion_data::Union{Vector{Float64},DeltaFMultipoleMoments},
     vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
     c0ref_source::Float64, u0ref_source::Float64,
     c0ref_other::Float64, u0ref_other::Float64,
     # max and min indices to interpolate, on the other (s') grid
-    ivperp_max::Int64,ivpa_min::Int64,ivpa_max::Int64)
+    ivperp_max::Int64,ivpa_min::Int64,ivpa_max::Int64
+    ) where {Tlabel <: AbstractRosenbluthPotentialLabel, Tpdf <: AbstractArray{Float64,2}}
     # denote source grid with s, other grid with s' = sp
     c0refs = c0ref_source
     u0refs = u0ref_source
@@ -3840,9 +3852,8 @@ and \$x_0,x_1,x_2\$ are parameters that are chosen so that \$C_{ss}\$
 conserves density, parallel velocity and pressure of \$F_s\$.
 """
 # corrections to preserve the symmetry of the collision operators
-function conserving_corrections!(CC::AbstractArray{Float64,3},
-                            pdf_in::AbstractArray{Float64,3}, nuref::Float64,
-                            fkpl_arrays::FokkerPlanckWeakformArrays)
+function conserving_corrections!(CC::Tpdf1, pdf_in::Tpdf2, nuref::Float64,
+            fkpl_arrays::FokkerPlanckWeakformArrays) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     @inbounds begin
         if fkpl_arrays.multi_species_operator_option == single_assembly_per_species
             # calculate necessary moments and store in fkpl_arrays
@@ -3937,34 +3948,30 @@ function conserving_corrections!(CC::AbstractArray{Float64,3},
 end
 # corrections to preserve the density, total momentum and total energy in the pdf(vpa,vperp,species)
 # only possible to apply to closed systems without fixed species or sources and sinks
-function conserving_corrections!(pdf_new::AbstractArray{Float64,3},
-                            pdf_old::AbstractArray{Float64,3},
-                            fkpl_arrays::FokkerPlanckWeakformArrays,
-                            source_data::Nothing)
+function conserving_corrections!(pdf_new::Tpdf1, pdf_old::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays,
+            source_data::Nothing) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     return conserving_corrections!(pdf_new, pdf_old, fkpl_arrays,
         fkpl_arrays.fixed_background_plasma, source_data)
 end
-function conserving_corrections!(pdf_new::AbstractArray{Float64,3},
-                            pdf_old::AbstractArray{Float64,3},
-                            fkpl_arrays::FokkerPlanckWeakformArrays,
-                            source_data::SlowingDownSourceData)
+function conserving_corrections!(pdf_new::Tpdf1, pdf_old::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays,
+            source_data::SlowingDownSourceData) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     # do nothing
     return nothing
 end
-function conserving_corrections!(pdf_new::AbstractArray{Float64,3},
-                            pdf_old::AbstractArray{Float64,3},
-                            fkpl_arrays::FokkerPlanckWeakformArrays,
-                            fixed_background_plasma::FixedBackgroundPlasmaData,
-                            source_data::Union{Nothing,SlowingDownSourceData})
+function conserving_corrections!(pdf_new::Tpdf1, pdf_old::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays,
+            fixed_background_plasma::FixedBackgroundPlasmaData,
+            source_data::Union{Nothing,SlowingDownSourceData}) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     # do nothing
     return nothing
 end
 # only if there are no sources and no fixed background can we apply these corrections to F
-function conserving_corrections!(pdf_new::AbstractArray{Float64,3},
-                            pdf_old::AbstractArray{Float64,3},
-                            fkpl_arrays::FokkerPlanckWeakformArrays,
-                            fixed_background_plasma::Nothing,
-                            source_data::Nothing)
+function conserving_corrections!(pdf_new::Tpdf1, pdf_old::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays,
+            fixed_background_plasma::Nothing,
+            source_data::Nothing) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
@@ -4049,10 +4056,10 @@ C_{ss^\\prime} = C^\\ast_{ss}[F_s,F_{s^\\prime}] - x_0 F_s
 where \$C^\\ast_{ss}[F_s,F_{s^\\prime}]\$ is the weak-form collision operator computed using
 the finite-element implementation.
 """
-function density_conserving_correction!(CC::AbstractArray{Float64,2},
-                            pdf_in::AbstractArray{Float64,2},
-                            vpa::FiniteElementCoordinate,
-                            vperp::FiniteElementCoordinate)
+function density_conserving_correction!(
+            CC::Tpdf1, pdf_in::Tpdf2,
+            vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate
+            ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     # compute density of the input pdf
     dens =  get_density(pdf_in, vpa, vperp)
 
@@ -4074,8 +4081,8 @@ end
 ##
 # element-wise integration function to get moments of C(vpa,vperp) without assembling C
 ##
-function calculate_collision_moments!(pdf_in::AbstractArray{Float64,3},
-    nuref::Float64,fkpl_arrays::FokkerPlanckWeakformArrays)
+function calculate_collision_moments!(pdf_in::Tpdf,
+    nuref::Float64,fkpl_arrays::FokkerPlanckWeakformArrays) where Tpdf <: AbstractArray{Float64,3}
     # call the lower level function after expanding some variables
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -4140,13 +4147,13 @@ function calculate_collision_moments!(pdf_in::AbstractArray{Float64,3},
     return nothing
 end
 
-function integrate_collision_moments(pdfs::AbstractArray{Float64,2},
-    d2Gspdvpa2::Tpdf,d2Gspdvperpdvpa::Tpdf,
-    d2Gspdvperp2::Tpdf,dHspdvpa::Tpdf,dHspdvperp::Tpdf,
+function integrate_collision_moments(pdfs::Tpdf1,
+    d2Gspdvpa2::Tpdf2,d2Gspdvperpdvpa::Tpdf2,
+    d2Gspdvperp2::Tpdf2,dHspdvpa::Tpdf2,dHspdvperp::Tpdf2,
     ms::Float64,msp::Float64,nussp::Float64,
     vpa::FiniteElementCoordinate,
     vperp::FiniteElementCoordinate,
-    YY_arrays::CollisionOperatorArrays) where Tpdf <: AbstractArray{Float64,2}
+    YY_arrays::CollisionOperatorArrays) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     if vpa.ngrid < 5 || vperp.ngrid < 5
         msg = """ERROR: integrate_collision_moments() is inconsistent with integration weights for vpa.ngrid < 5 or vperp.ngrid < 5
         """
@@ -4225,14 +4232,13 @@ function integrate_collision_moments(pdfs::AbstractArray{Float64,2},
 end
 
 function fokker_planck_collision_operator_solve!(
-                         CCssp::AbstractArray{Float64,2},
-                         ffs_in::AbstractArray{Float64,2},
-                         rosenbluth_potential_sp_in::RosenbluthPotentialData,
-                         ms::Float64, msp::Float64, nussp::Float64,
-                         rhsvpavperp::AbstractArray{Float64,2},
-                         lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},
-                         YY_arrays::CollisionOperatorArrays,
-                         vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate)
+            CCssp::Tpdf1, ffs_in::Tpdf2,
+            rosenbluth_potential_sp_in::RosenbluthPotentialData,
+            ms::Float64, msp::Float64, nussp::Float64,
+            rhsvpavperp::Array{Float64,2},
+            lu_obj_MM::SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},
+            YY_arrays::CollisionOperatorArrays,
+            vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     # assemble the RHS of the collision operator matrix eq
     assemble_explicit_collision_operator_rhs_serial!(rhsvpavperp,ffs_in,
             rosenbluth_potential_sp_in,ms,msp,nussp,vpa,vperp,YY_arrays)

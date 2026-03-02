@@ -71,9 +71,10 @@ function calculate_total_change(CCs,fkpl_arrays)
     return total_momentum_change, total_energy_change
 end
 
-function get_moments(pdf::AbstractArray{Float64,2},
+function get_moments(pdf::Tpdf,
     vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
-    mass::Float64,c0ref::Float64,u0ref::Float64,n0ref::Float64)
+    mass::Float64,c0ref::Float64,u0ref::Float64,n0ref::Float64
+    ) where Tpdf <: AbstractArray{Float64,2}
     dens = get_density(pdf,vpa,vperp)
     if abs(dens) < 1.0e-14
         density, upar, pressure, temperature, vth, ppar, qpar, rmom = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -91,15 +92,14 @@ function get_moments(pdf::AbstractArray{Float64,2},
     return density, upar, vth, pressure, temperature, ppar, qpar, rmom
 end
 
-function diagnose_F_Maxwellian(CC::AbstractArray{Float64,3},
-                    pdf::AbstractArray{Float64,3},
-                    pdf_exact::AbstractArray{Float64,3},
-                    pdf_dummy_1::AbstractArray{Float64,2},
-                    pdf_dummy_2::AbstractArray{Float64,2},
+function diagnose_F_Maxwellian(CC::Tpdf1, pdf::Tpdf2, pdf_exact::Tpdf3,
+                    pdf_dummy_1::Tpdf4, pdf_dummy_2::Tpdf5,
                     fkpl_arrays::FokkerPlanckWeakformArrays,
                     moments::moments_struct,
-                    time::Float64,
-                    it::Int64; updated_CC=true)
+                    time::Float64, it::Int64; updated_CC=true
+                    ) where {Tpdf1 <: AbstractArray{Float64,3},Tpdf2 <: AbstractArray{Float64,3},
+                    Tpdf3 <: AbstractArray{Float64,3}, Tpdf4 <: AbstractArray{Float64,2},
+                    Tpdf5 <: AbstractArray{Float64,2}}
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -215,13 +215,13 @@ function chebyshev_grid(name::String,
     return element_data
 end
 
-function set_initial_pdf!(Fold::AbstractArray{Float64,2},
+function set_initial_pdf!(Fold::Tpdf,
             vpa::FiniteElementCoordinate,
             vperp::FiniteElementCoordinate,
             vpa0::Float64,
             vperp0::Float64,
             vth0::Float64,
-            zbeam::Float64)
+            zbeam::Float64) where Tpdf <: AbstractArray{Float64,2}
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -266,7 +266,7 @@ function print_grid(coord)
     return nothing
 end
 
-function print_pdf(pdf::AbstractArray{Float64,4})
+function print_pdf(pdf::Tpdf) where Tpdf <: AbstractArray{Float64,4}
     println("# Expected Fout")
     print("[")
     nvpa, nvperp, nspecies, ntind = size(pdf)
@@ -298,5 +298,5 @@ end
 struct pdf_and_grid
     vpa_grid::Vector{Float64}
     vperp_grid::Vector{Float64}
-    pdf::AbstractArray{Float64,4}
+    pdf::Array{Float64,4}
 end

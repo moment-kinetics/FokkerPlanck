@@ -408,10 +408,11 @@ end
 """
 Function to print the maximum error \${\\rm MAX}(|f_{\\rm numerical}-f_{\\rm exact}|)\$.
 """
-function print_test_data(func_exact::AbstractArray{Float64,2},
-                        func_num::AbstractArray{Float64,2},
-                        func_err::AbstractArray{Float64,2},
-                        func_name::String)
+function print_test_data(func_exact::Tpdf1,
+            func_num::Tpdf2,
+            func_err::Tpdf3,
+            func_name::String) where {Tpdf <: AbstractArray{Float64,2},
+                Tpdf1 <: Tpdf, Tpdf2 <: Tpdf, Tpdf3 <: Tpdf}
     @. func_err = abs(func_num - func_exact)
     max_err = maximum(func_err)
     println("maximum("*func_name*"_err): ",max_err)
@@ -425,13 +426,15 @@ Function to print the maximum error \${\\rm MAX}(|f_{\\rm numerical}-f_{\\rm exa
 \\sqrt{\\int (f - f_{\\rm exact})^2 v_\\perp d v_\\perp d v_\\|/\\int v_\\perp d v_\\perp d v_\\|}.
 ```
 """
-function print_test_data(func_exact::AbstractArray{Float64,2},
-                    func_num::AbstractArray{Float64,2},
-                    func_err::AbstractArray{Float64,2},
-                    func_name::String,
-                    vpa::FiniteElementCoordinate,
-                    vperp::FiniteElementCoordinate,
-                    dummy::AbstractArray{Float64,2};print_to_screen=true::Bool)
+function print_test_data(func_exact::Tpdf1,
+            func_num::Tpdf2,
+            func_err::Tpdf3,
+            func_name::String,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate,
+            dummy::Tpdf4; print_to_screen=true::Bool
+            ) where {Tpdf <: AbstractArray{Float64,2},
+            Tpdf1 <: Tpdf, Tpdf2 <: Tpdf, Tpdf3 <: Tpdf, Tpdf4 <: Tpdf}
     @. func_err = abs(func_num - func_exact)
     max_err = maximum(func_err)
     @. dummy = func_err^2

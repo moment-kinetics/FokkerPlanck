@@ -84,15 +84,16 @@ function slowing_down_pdf(vpa, vperp, species, source_rate, source_v0, source_vt
     return sd_pdf
 end
 
-function print_test_data(func_exact::AbstractArray{Float64,2},
-                    func_num::AbstractArray{Float64,2},
-                    func_err::AbstractArray{Float64,2},
+function print_test_data(func_exact::Tpdf1,
+                    func_num::Tpdf1,
+                    func_err::Tpdf2,
                     func_name::String,
                     vpa::FiniteElementCoordinate,
                     vperp::FiniteElementCoordinate,
-                    dummy::AbstractArray{Float64,2},
+                    dummy::Tpdf2,
                     v_max::Float64, v_min::Float64;
-                    print_to_screen=true::Bool)
+                    print_to_screen=true::Bool
+                    ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     @. func_err = 0.0
     @. dummy = 0.0
     # compute error in range [v_min,v_max]
@@ -138,12 +139,12 @@ struct SD_error_data
     end
 end
 
-function diagnose_F_SD!(sd_errors::SD_error_data,sd_pdf::AbstractArray{Float64,3},
-    Fold::AbstractArray{Float64,3}, Fdummy1::AbstractArray{Float64,3},
-    Fdummy2::AbstractArray{Float64,2}, Fdummy3::AbstractArray{Float64,2},
+function diagnose_F_SD!(sd_errors::SD_error_data,sd_pdf::Tpdf1,
+    Fold::Tpdf1, Fdummy1::Tpdf1,
+    Fdummy2::Tpdf2, Fdummy3::Tpdf2,
     source_v0::Vector{Float64}, vth_ion::Float64,
     vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate, species::SpeciesData;
-    print_to_screen=true::Bool)
+    print_to_screen=true::Bool) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,2}} 
     @. Fdummy1 = 0.0
     for is in 1:species.n
         vmax = 1.1*source_v0[is]
