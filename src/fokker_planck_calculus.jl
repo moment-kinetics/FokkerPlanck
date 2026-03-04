@@ -53,7 +53,7 @@ using FiniteElementAssembly: first_derivative!, FiniteElementCoordinate, ScalarC
         AbstractBoundaryCondition, NaturalBC, DirichletBC, assemble_operator, integral, get_ielement,
         value_in_coordinate_domain
 
-using JacobianFreeNewtonKrylov: nl_solver_info
+using JacobianFreeNewtonKrylov: NewtonKrylovSolverData
 """
 Options for selecting which boundary data calculation to use
 """
@@ -998,13 +998,8 @@ struct FokkerPlanckBackwardEulerData{TFloat<:Float64,
     lu_objs_CC2D::Array{SuiteSparse.UMFPACK.UmfpackLU{Float64,Int64},1}
     # dummy arrays for Jacobian-Free-Newton-Krylov solver
     # multispecies dummy arrays
-    nl_solver_data_s::nl_solver_info{Array{Float64,2},Array{Float64,4},Array{Float64,1}}
+    nl_solver_data_s::NewtonKrylovSolverData{Float64}
     Fs_new::Array{Float64,3}
-    Fs_residual::Array{Float64,3}
-    Fs_delta_x::Array{Float64,3}
-    Fs_rhs_delta::Array{Float64,3}
-    Fsv::Array{Float64,3}
-    Fsw::Array{Float64,3}
     fp_operator::FokkerPlanckWeakformArrays
     source_data::Union{SlowingDownSourceData,Nothing}
     # constructor with interface and JFNK optional arguments
@@ -1076,16 +1071,11 @@ struct FokkerPlanckBackwardEulerData{TFloat<:Float64,
             lu_objs_CC2D[is] = lu_obj_CC2D
         end
         # dummy arrays for JFNK
-        nl_solver_data_s = nl_solver_info((species=species,vperp=vperp,vpa=vpa);
+        nl_solver_data_s = NewtonKrylovSolverData(Float64,species.n*vperp.n*vpa.n;
                                         atol=nl_solver_atol,
                                         rtol=nl_solver_rtol,
                                         nonlinear_max_iterations=nl_solver_nonlinear_max_iterations)
         Fs_new = Array{Float64}(undef,nvpa,nvperp,nspecies)
-        Fs_residual = Array{Float64}(undef,nvpa,nvperp,nspecies)
-        Fs_delta_x = Array{Float64}(undef,nvpa,nvperp,nspecies)
-        Fs_rhs_delta = Array{Float64}(undef,nvpa,nvperp,nspecies)
-        Fsv = Array{Float64}(undef,nvpa,nvperp,nspecies)
-        Fsw = Array{Float64}(undef,nvpa,nvperp,nspecies)
         # data for the FP operators
         fp_operator = FokkerPlanckWeakformArrays(vpa,vperp,species,
                                                 boundary_data_option;
@@ -1101,7 +1091,7 @@ struct FokkerPlanckBackwardEulerData{TFloat<:Float64,
             CC2D_sparse,lu_obj_CC2D,
             lu_objs_CC2D,
             nl_solver_data_s,
-            Fs_new,Fs_residual,Fs_delta_x,Fs_rhs_delta,Fsv,Fsw,
+            Fs_new,
             fp_operator,source_data)
     end
 end
