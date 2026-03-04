@@ -5,9 +5,8 @@ using LaTeXStrings
 using Measures
 using Dates
 import FokkerPlanck
-using FokkerPlanck.array_allocation: allocate_float
-using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs
-using FokkerPlanck.type_definitions: mk_float, mk_int
+using FiniteElementAssembly: FiniteElementCoordinate, ScalarCoordinateInputs,
+        exclude_lower_boundary_point, include_boundary_points
 using FokkerPlanck: fokker_planck_collision_operator_weak_form!
 using FokkerPlanck: conserving_corrections!
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp
@@ -21,12 +20,12 @@ using FokkerPlanck.fokker_planck_test: Cssp_Maxwellian_inputs
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data
 using FokkerPlanck.fokker_planck_test: save_fkpl_error_data
 
-using FokkerPlanck.fokker_planck_calculus: fokkerplanck_weakform_arrays_struct
-using FokkerPlanck.fokker_planck_calculus: rosenbluth_potential_boundary_data
+using FokkerPlanck.fokker_planck_calculus: FokkerPlanckWeakformArrays
+using FokkerPlanck.fokker_planck_calculus: RosenbluthPotentialBoundaryData
 using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potential_boundary_data!, calculate_rosenbluth_potential_boundary_data_exact!
 using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_data, enforce_vpavperp_BCs!
 using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potentials_via_elliptic_solve!,
-                                            species_info
+                                            SpeciesData
 
 function plot_test_data(func_exact,func_num,func_err,func_name,vpa,vperp)
     @views heatmap(vperp.grid, vpa.grid, func_num[:,:], ylabel=L"v_{\|\|}", xlabel=L"v_{\perp}", c = :deep, interpolation = :cubic,
@@ -43,8 +42,8 @@ function plot_test_data(func_exact,func_num,func_err,func_name,vpa,vperp)
                 savefig(outfile)
     return nothing
 end
-    
-    function print_matrix(matrix,name::String,n::mk_int,m::mk_int)
+
+    function print_matrix(matrix,name::String,n::Int64,m::Int64)
         println("\n ",name," \n")
         for i in 1:n
             for j in 1:m
@@ -54,15 +53,15 @@ end
         end
         println("\n")
     end
-    
-    function print_vector(vector,name::String,m::mk_int)
+
+    function print_vector(vector,name::String,m::Int64)
         println("\n ",name," \n")
         for j in 1:m
             @printf("%.3f ", vector[j])
         end
         println("")
         println("\n")
-    end 
+    end
 
     function test_weak_form_collisions(ngrid,nelement_vpa,nelement_vperp;
         Lvpa=12.0,Lvperp=6.0,plot_test_output=false,
@@ -72,43 +71,39 @@ end
         test_numerical_conserving_terms=false,
         algebraic_solve_for_d2Gdvperp2=false,
         boundary_data_option=direct_integration)
-        
-        element_spacing_option = "uniform"
+
         println("made inputs")
         println("vpa: ngrid: ",ngrid," nelement: ",nelement_vpa, " Lvpa: ",Lvpa)
         println("vperp: ngrid: ",ngrid," nelement: ",nelement_vperp, " Lvperp: ",Lvperp)
         # create the coordinate structs
-        vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
-                                    nelement_vperp,
-                                    Lvperp),
-                                    element_spacing_option=element_spacing_option)
-        vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
-                                    nelement_vpa,
-                                    Lvpa),
-                                    element_spacing_option=element_spacing_option)
+        vperp = FiniteElementCoordinate("vperp", ScalarCoordinateInputs(ngrid, nelement_vperp,
+                                    0.0, Lvperp, exclude_lower_boundary_point),
+                                    weight_function=((vperp)-> 2.0*pi*vperp))
+        vpa = FiniteElementCoordinate("vpa", ScalarCoordinateInputs(ngrid, nelement_vpa,
+                                    -0.5*Lvpa, 0.5*Lvpa, include_boundary_points))
         nc_global = vpa.n*vperp.n
         start_init_time = now()
-        species = species_info([1.0],[1.0])
-        fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option)
+        species = SpeciesData([1.0],[1.0])
+        fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option)
         matrix_operators = fkpl_arrays.fprp_solver_data.matrix_operators
         KKpar2D_with_BC_terms_sparse = matrix_operators.KKpar2D_with_BC_terms_sparse
         KKperp2D_with_BC_terms_sparse = matrix_operators.KKperp2D_with_BC_terms_sparse
         lu_obj_MM = matrix_operators.lu_obj_MM
         finish_init_time = now()
-        
-        fvpavperp = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        fvpavperp_test = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        fvpavperp_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvpa2_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvpa2_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvpa2_num = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvperp2_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvperp2_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2fvpavperp_dvperp2_num = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        fc = Array{mk_float,1}(undef,nc_global)
-        dfc = Array{mk_float,1}(undef,nc_global)
-        gc = Array{mk_float,1}(undef,nc_global)
-        dgc = Array{mk_float,1}(undef,nc_global)
+
+        fvpavperp = Array{Float64,2}(undef,vpa.n,vperp.n)
+        fvpavperp_test = Array{Float64,2}(undef,vpa.n,vperp.n)
+        fvpavperp_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvpa2_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvpa2_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvpa2_num = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvperp2_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvperp2_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2fvpavperp_dvperp2_num = Array{Float64,2}(undef,vpa.n,vperp.n)
+        fc = Array{Float64,1}(undef,nc_global)
+        dfc = Array{Float64,1}(undef,nc_global)
+        gc = Array{Float64,1}(undef,nc_global)
+        dgc = Array{Float64,1}(undef,nc_global)
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
                 fvpavperp[ivpa,ivperp] = exp(-vpa.grid[ivpa]^2 - vperp.grid[ivperp]^2)
@@ -117,7 +112,7 @@ end
                 d2fvpavperp_dvperp2_exact[ivpa,ivperp] = 4.0*(vperp.grid[ivperp]^2 - 1.0)*exp(-vpa.grid[ivpa]^2 - vperp.grid[ivperp]^2)
             end
         end
-        
+
         # get 1d views of fvpavperp
         fc = vec(fvpavperp)
         d2fc_dvpa2 = vec(d2fvpavperp_dvpa2_num)
@@ -144,39 +139,39 @@ end
             plot_test_data(d2fvpavperp_dvperp2_exact,d2fvpavperp_dvperp2_num,d2fvpavperp_dvperp2_err,"d2fvpavperp_dvperp2",vpa,vperp)
         end
         # test the Laplacian solve with a standard F_Maxwellian -> H_Maxwellian test
-        dummy_vpavperp = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        Fs_M = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        F_M = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        C_M_num = allocate_float(vpa.n,vperp.n)
-        C_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        C_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        #dFdvpa_M = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        #dFdvperp_M = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        #d2Fdvperpdvpa_M = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        H_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        H_M_num = allocate_float(vpa.n,vperp.n)
-        H_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        G_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        G_M_num = allocate_float(vpa.n,vperp.n)
-        G_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvpa2_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvpa2_M_num = allocate_float(vpa.n,vperp.n)
-        d2Gdvpa2_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvperp2_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvperp2_M_num = allocate_float(vpa.n,vperp.n)
-        d2Gdvperp2_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dGdvperp_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dGdvperp_M_num = allocate_float(vpa.n,vperp.n)
-        dGdvperp_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvperpdvpa_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        d2Gdvperpdvpa_M_num = allocate_float(vpa.n,vperp.n)
-        d2Gdvperpdvpa_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dHdvpa_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dHdvpa_M_num = allocate_float(vpa.n,vperp.n)
-        dHdvpa_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dHdvperp_M_exact = Array{mk_float,2}(undef,vpa.n,vperp.n)
-        dHdvperp_M_num = allocate_float(vpa.n,vperp.n)
-        dHdvperp_M_err = Array{mk_float,2}(undef,vpa.n,vperp.n)
+        dummy_vpavperp = Array{Float64,2}(undef,vpa.n,vperp.n)
+        Fs_M = Array{Float64,2}(undef,vpa.n,vperp.n)
+        F_M = Array{Float64,2}(undef,vpa.n,vperp.n)
+        C_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        C_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        C_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        #dFdvpa_M = Array{Float64,2}(undef,vpa.n,vperp.n)
+        #dFdvperp_M = Array{Float64,2}(undef,vpa.n,vperp.n)
+        #d2Fdvperpdvpa_M = Array{Float64,2}(undef,vpa.n,vperp.n)
+        H_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        H_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        H_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        G_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        G_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        G_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvpa2_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvpa2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        d2Gdvpa2_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvperp2_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvperp2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        d2Gdvperp2_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dGdvperp_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dGdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        dGdvperp_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvperpdvpa_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        d2Gdvperpdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        d2Gdvperpdvpa_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dHdvpa_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dHdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        dHdvpa_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dHdvperp_M_exact = Array{Float64,2}(undef,vpa.n,vperp.n)
+        dHdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+        dHdvperp_M_err = Array{Float64,2}(undef,vpa.n,vperp.n)
 
         if test_self_operator
             dens, upar, vth = 1.0, 1.0, 1.0
@@ -207,16 +202,16 @@ end
                                                                 nussp,vpa.grid[ivpa],vperp.grid[ivperp])
             end
         end
-        rpbd_exact = rosenbluth_potential_boundary_data(vpa,vperp)
+        rpbd_exact = RosenbluthPotentialBoundaryData(vpa,vperp)
 
-        
+
         # use known test function to provide exact data
         calculate_rosenbluth_potential_boundary_data_exact!(rpbd_exact,
               H_M_exact,dHdvpa_M_exact,dHdvperp_M_exact,G_M_exact,
               dGdvperp_M_exact,d2Gdvperp2_M_exact,
               d2Gdvperpdvpa_M_exact,d2Gdvpa2_M_exact,vpa,vperp)
         println("begin C calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        
+
         fokker_planck_collision_operator_weak_form!(C_M_num,Fs_M,F_M,ms,msp,nussp,fkpl_arrays,
                                              use_Maxwellian_Rosenbluth_coefficients=use_Maxwellian_Rosenbluth_coefficients,
                                              algebraic_solve_for_d2Gdvperp2=algebraic_solve_for_d2Gdvperp2,
@@ -247,18 +242,18 @@ end
                 end
             end
         end
-        
+
         init_time = Dates.value(finish_init_time - start_init_time)
         calculate_time = Dates.value(now() - finish_init_time)
         fkerr = allocate_error_data()
         println("finished C calculation   ", Dates.format(now(), dateformat"H:MM:SS"))
-        
+
         # test the boundary data calculation
         if !use_Maxwellian_Rosenbluth_coefficients
             max_H_err, max_dHdvpa_err, max_dHdvperp_err, max_G_err, max_dGdvperp_err,
             max_d2Gdvperp2_err, max_d2Gdvperpdvpa_err, max_d2Gdvpa2_err = test_rosenbluth_potential_boundary_data(fkpl_arrays.fprp_solver_data.rpbd,rpbd_exact,vpa,vperp)
         end
-        dummy_array = Array{mk_float,2}(undef,vpa.n,vperp.n)
+        dummy_array = Array{Float64,2}(undef,vpa.n,vperp.n)
         fkerr.H_M.max, fkerr.H_M.L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array)
         fkerr.dHdvpa_M.max, fkerr.dHdvpa_M.L2 = print_test_data(dHdvpa_M_exact,dHdvpa_M_num,dHdvpa_M_err,"dHdvpa_M",vpa,vperp,dummy_array)
         fkerr.dHdvperp_M.max, fkerr.dHdvperp_M.L2 = print_test_data(dHdvperp_M_exact,dHdvperp_M_num,dHdvperp_M_err,"dHdvperp_M",vpa,vperp,dummy_array)
@@ -268,7 +263,7 @@ end
         fkerr.d2Gdvperpdvpa_M.max, fkerr.d2Gdvperpdvpa_M.L2 = print_test_data(d2Gdvperpdvpa_M_exact,d2Gdvperpdvpa_M_num,d2Gdvperpdvpa_M_err,"d2Gdvperpdvpa_M",vpa,vperp,dummy_array)
         fkerr.d2Gdvperp2_M.max, fkerr.d2Gdvperp2_M.L2 = print_test_data(d2Gdvperp2_M_exact,d2Gdvperp2_M_num,d2Gdvperp2_M_err,"d2Gdvperp2_M",vpa,vperp,dummy_array)
         fkerr.C_M.max, fkerr.C_M.L2 = print_test_data(C_M_exact,C_M_num,C_M_err,"C_M",vpa,vperp,dummy_array)
-        
+
         # calculate the entropy production
         lnfC = matrix_operators.rhsvpavperp
         @inbounds begin
@@ -328,7 +323,7 @@ end
             expected[iscan] = nelement_list[iscan]^power
         end
     end
-    
+
     function run_assembly_test(; ngrid=5, nelement_list = [8],
         plot_scan=true,
         save_HDF5 = true,
@@ -355,46 +350,46 @@ end
         #nelement_list = Int[8]
         #nelement_list = Int[4]
         nscan = size(nelement_list,1)
-        max_C_err = Array{mk_float,1}(undef,nscan)
-        max_H_err = Array{mk_float,1}(undef,nscan)
-        max_G_err = Array{mk_float,1}(undef,nscan)
-        max_dHdvpa_err = Array{mk_float,1}(undef,nscan)
-        max_dHdvperp_err = Array{mk_float,1}(undef,nscan)
-        max_d2Gdvperp2_err = Array{mk_float,1}(undef,nscan)
-        max_d2Gdvpa2_err = Array{mk_float,1}(undef,nscan)
-        max_d2Gdvperpdvpa_err = Array{mk_float,1}(undef,nscan)
-        max_dGdvperp_err = Array{mk_float,1}(undef,nscan)
-        L2_C_err = Array{mk_float,1}(undef,nscan)
-        L2_H_err = Array{mk_float,1}(undef,nscan)
-        L2_G_err = Array{mk_float,1}(undef,nscan)
-        L2_dHdvpa_err = Array{mk_float,1}(undef,nscan)
-        L2_dHdvperp_err = Array{mk_float,1}(undef,nscan)
-        L2_d2Gdvperp2_err = Array{mk_float,1}(undef,nscan)
-        L2_d2Gdvpa2_err = Array{mk_float,1}(undef,nscan)
-        L2_d2Gdvperpdvpa_err = Array{mk_float,1}(undef,nscan)
-        L2_dGdvperp_err = Array{mk_float,1}(undef,nscan)
-        #max_d2fsdvpa2_err = Array{mk_float,1}(undef,nscan)
-        #max_d2fsdvperp2_err = Array{mk_float,1}(undef,nscan)
-        n_err = Array{mk_float,1}(undef,nscan)
-        u_err = Array{mk_float,1}(undef,nscan)
-        p_err = Array{mk_float,1}(undef,nscan)
-        calculate_times = Array{mk_float,1}(undef,nscan)
-        init_times = Array{mk_float,1}(undef,nscan)
-        
-        expected = Array{mk_float,1}(undef,nscan)
+        max_C_err = Array{Float64,1}(undef,nscan)
+        max_H_err = Array{Float64,1}(undef,nscan)
+        max_G_err = Array{Float64,1}(undef,nscan)
+        max_dHdvpa_err = Array{Float64,1}(undef,nscan)
+        max_dHdvperp_err = Array{Float64,1}(undef,nscan)
+        max_d2Gdvperp2_err = Array{Float64,1}(undef,nscan)
+        max_d2Gdvpa2_err = Array{Float64,1}(undef,nscan)
+        max_d2Gdvperpdvpa_err = Array{Float64,1}(undef,nscan)
+        max_dGdvperp_err = Array{Float64,1}(undef,nscan)
+        L2_C_err = Array{Float64,1}(undef,nscan)
+        L2_H_err = Array{Float64,1}(undef,nscan)
+        L2_G_err = Array{Float64,1}(undef,nscan)
+        L2_dHdvpa_err = Array{Float64,1}(undef,nscan)
+        L2_dHdvperp_err = Array{Float64,1}(undef,nscan)
+        L2_d2Gdvperp2_err = Array{Float64,1}(undef,nscan)
+        L2_d2Gdvpa2_err = Array{Float64,1}(undef,nscan)
+        L2_d2Gdvperpdvpa_err = Array{Float64,1}(undef,nscan)
+        L2_dGdvperp_err = Array{Float64,1}(undef,nscan)
+        #max_d2fsdvpa2_err = Array{Float64,1}(undef,nscan)
+        #max_d2fsdvperp2_err = Array{Float64,1}(undef,nscan)
+        n_err = Array{Float64,1}(undef,nscan)
+        u_err = Array{Float64,1}(undef,nscan)
+        p_err = Array{Float64,1}(undef,nscan)
+        calculate_times = Array{Float64,1}(undef,nscan)
+        init_times = Array{Float64,1}(undef,nscan)
+
+        expected = Array{Float64,1}(undef,nscan)
         expected_nelement_scaling!(expected,nelement_list,ngrid,nscan)
-        expected_integral = Array{mk_float,1}(undef,nscan)
+        expected_integral = Array{Float64,1}(undef,nscan)
         expected_nelement_integral_scaling!(expected_integral,nelement_list,ngrid,nscan)
         expected_label = L"(1/N_{el})^{n_g - 1}"
         expected_integral_label = L"(1/N_{el})^{n_g +1}"
-        
-        expected_t_2 = Array{mk_float,1}(undef,nscan)
-        expected_t_3 = Array{mk_float,1}(undef,nscan)
+
+        expected_t_2 = Array{Float64,1}(undef,nscan)
+        expected_t_3 = Array{Float64,1}(undef,nscan)
         expect_timing!(expected_t_2,nelement_list,nscan,2)
         expect_timing!(expected_t_3,nelement_list,nscan,3)
         expected_t_2_label = L"(N_{element})^2"
         expected_t_3_label = L"(N_{element})^3"
-        
+
         for iscan in 1:nscan
             local nelement = nelement_list[iscan]
             nelement_vpa = 2*nelement
@@ -433,29 +428,29 @@ end
             d2Gdvpa2label = L"\epsilon_{\infty}(d^2G/d v_{\|\|}^2)"
             d2Gdvperpdvpalabel = L"\epsilon_{\infty}(d^2G/d v_{\perp} d v_{\|\|})"
             dGdvperplabel = L"\epsilon_{\infty}(dG/d v_{\perp})"
-            
+
             #println(max_G_err,max_H_err,max_dHdvpa_err,max_dHdvperp_err,max_d2Gdvperp2_err,max_d2Gdvpa2_err,max_d2Gdvperpdvpa_err,max_dGdvperp_err, expected, expected_integral)
             plot(nelement_list, [max_C_err,max_H_err,max_G_err, expected, expected_integral],
             xlabel=xlabel, label=[Clabel Hlabel Glabel expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             outfile = outpath*"fkpl_C_G_H_max_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
             println([max_C_err,max_H_err,max_G_err, expected, expected_integral])
-            
+
             plot(nelement_list,  [max_dHdvpa_err, max_dHdvperp_err, max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err, expected,      expected_integral],
             xlabel=xlabel, label=[dHdvpalabel     dHdvperplabel     d2Gdvperp2label     d2Gdvpa2label     d2Gdvperpdvpalabel     dGdvperplabel     expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             outfile = outpath*"fkpl_coeffs_max_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
             println([max_dHdvpa_err, max_dHdvperp_err, max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err, expected,      expected_integral])
-            
-            
+
+
             ClabelL2 = L"\epsilon_{L2}(C)"
             HlabelL2 = L"\epsilon_{L2}(H)"
             GlabelL2 = L"\epsilon_{L2}(G)"
@@ -465,36 +460,36 @@ end
             d2Gdvpa2labelL2 = L"\epsilon_{L2}(d^2G/d v_{\|\|}^2)"
             d2GdvperpdvpalabelL2 = L"\epsilon_{L2}(d^2G/d v_{\perp} d v_{\|\|})"
             dGdvperplabelL2 = L"\epsilon_{L2}(dG/d v_{\perp})"
-            
-            
+
+
             plot(nelement_list, [L2_C_err,L2_H_err,L2_G_err, expected, expected_integral],
             xlabel=xlabel, label=[ClabelL2 HlabelL2 GlabelL2 expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             outfile = outpath*"fkpl_C_G_H_L2_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
             println([L2_C_err,L2_H_err,L2_G_err, expected, expected_integral])
-            
+
             plot(nelement_list,  [L2_dHdvpa_err, L2_dHdvperp_err, L2_d2Gdvperp2_err, L2_d2Gdvpa2_err, L2_d2Gdvperpdvpa_err, L2_dGdvperp_err,  expected,      expected_integral],
             xlabel=xlabel, label=[dHdvpalabelL2  dHdvperplabelL2  d2Gdvperp2labelL2  d2Gdvpa2labelL2  d2GdvperpdvpalabelL2  dGdvperplabelL2   expected_label expected_integral_label], ylabel="",
-             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+             shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
               xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
               foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
             outfile = outpath*"fkpl_coeffs_L2_test_ngrid_"*string(ngrid)*"_GLL.pdf"
             savefig(outfile)
             println(outfile)
             println([L2_dHdvpa_err, L2_dHdvperp_err, L2_d2Gdvperp2_err, L2_d2Gdvpa2_err, L2_d2Gdvperpdvpa_err, L2_dGdvperp_err,  expected,      expected_integral])
-            
+
             nlabel = L"|\Delta n|"
             ulabel = L"|\Delta u_{\|\|}|"
             plabel = L"|\Delta p|"
-            
+
             if test_self_operator
                 plot(nelement_list, [max_C_err, L2_C_err, n_err, u_err, p_err, expected, expected_integral],
                 xlabel=xlabel, label=[Clabel ClabelL2 nlabel ulabel plabel expected_label expected_integral_label], ylabel="",
-                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
                   xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
                   foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
                 outfile = outpath*"fkpl_conservation_test_ngrid_"*string(ngrid)*"_GLL.pdf"
@@ -504,15 +499,15 @@ end
             else
                 plot(nelement_list, [max_C_err, L2_C_err, n_err, expected, expected_integral],
                 xlabel=xlabel, label=[Clabel ClabelL2 nlabel expected_label expected_integral_label], ylabel="",
-                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2, 
+                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), yticks = (ytick_sequence, ytick_sequence), markersize = 5, linewidth=2,
                   xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
                   foreground_color_legend = nothing, background_color_legend = nothing, legend=:bottomleft)
                 outfile = outpath*"fkpl_conservation_test_ngrid_"*string(ngrid)*"_GLL.pdf"
                 savefig(outfile)
-                println(outfile)        
+                println(outfile)
                 println([max_C_err, L2_C_err, n_err, expected, expected_integral])
             end
-            
+
             calculate_timeslabel = "time/step (ms)"
             init_timeslabel = "time/init (ms)"
             outfile = outpath*"fkpl_timing_test_ngrid_"*string(ngrid)*"_GLL.pdf"
@@ -520,7 +515,7 @@ end
                 ytick_sequence_timing = Array([10^2,10^3,10^4,10^5,10^6])
                 plot(nelement_list, [calculate_times, init_times, expected_t_2, expected_t_3],
                 xlabel=xlabel, label=[calculate_timeslabel init_timeslabel expected_t_2_label expected_t_3_label], ylabel="",
-                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), markersize = 5, linewidth=2, 
+                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), markersize = 5, linewidth=2,
                   xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
                   foreground_color_legend = nothing, background_color_legend = nothing, legend=:topleft)
                 println([calculate_times, init_times, expected_t_2, expected_t_3])
@@ -528,7 +523,7 @@ end
                 ytick_sequence_timing = Array([10^2,10^3,10^4,10^5])
                 plot(nelement_list, [calculate_times, init_times, expected_t_2],
                 xlabel=xlabel, label=[calculate_timeslabel init_timeslabel expected_t_2_label], ylabel="",
-                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), markersize = 5, linewidth=2, 
+                 shape =:circle, xscale=:log10, yscale=:log10, xticks = (nelement_list, nelement_list), markersize = 5, linewidth=2,
                   xtickfontsize = fontsize, xguidefontsize = fontsize, ytickfontsize = fontsize, yguidefontsize = fontsize, legendfontsize = fontsize,
                   foreground_color_legend = nothing, background_color_legend = nothing, legend=:topleft)
                 println([calculate_times, init_times, expected_t_2])
@@ -540,7 +535,7 @@ end
             ncore = 1
             save_fkpl_error_data(outpath,ncore,ngrid,nelement_list,
                 max_C_err, max_H_err, max_G_err, max_dHdvpa_err, max_dHdvperp_err,
-                max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err, 
+                max_d2Gdvperp2_err, max_d2Gdvpa2_err, max_d2Gdvperpdvpa_err, max_dGdvperp_err,
                 L2_C_err, L2_H_err, L2_G_err, L2_dHdvpa_err, L2_dHdvperp_err, L2_d2Gdvperp2_err,
                 L2_d2Gdvpa2_err, L2_d2Gdvperpdvpa_err, L2_dGdvperp_err,
                 n_err, u_err, p_err, calculate_times, init_times, expected_t_2, expected_t_3,

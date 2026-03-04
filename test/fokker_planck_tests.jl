@@ -6,49 +6,39 @@ export backward_Euler_linearised_collisions_test
 export backward_Euler_fokker_planck_self_collisions_test
 
 using LinearAlgebra: mul!, ldiv!
-using FokkerPlanck.array_allocation: allocate_float
-using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs,
-                                finite_element_boundary_condition_type,
-                                natural_boundary_condition, zero_boundary_condition
-using FokkerPlanck.type_definitions: mk_float, mk_int
+using FiniteElementAssembly: FiniteElementCoordinate, ScalarCoordinateInputs,
+            exclude_lower_boundary_point, include_boundary_points
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_pperp, get_qpar, get_rmom
 using FokkerPlanck.fokker_planck_calculus: direct_integration, multipole_expansion, delta_f_multipole, boundary_data_type,
-                                            repeat_assembly_per_species, single_assembly_per_species, multi_species_operator_type
+                                            repeat_assembly_per_species, single_assembly_per_species, multi_species_operator_type,
+                                            natural_boundary_condition, zero_boundary_condition
 
-using FokkerPlanck: fokker_planck_backward_euler_data, fokker_planck_collision_operator_weak_form!
-using FokkerPlanck: conserving_corrections!, species_info, fixed_background_plasma_input
+using FokkerPlanck: FokkerPlanckBackwardEulerData, fokker_planck_collision_operator_weak_form!
+using FokkerPlanck: conserving_corrections!, SpeciesData, FixedBackgroundPlasmaInput
 using FokkerPlanck: fokker_planck_collisions_backward_euler_step!, calculate_entropy_production
 using FokkerPlanck.fokker_planck_test: print_test_data, fkpl_error_data, allocate_error_data #, plot_test_data
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, G_Maxwellian, H_Maxwellian, F_Beam
 using FokkerPlanck.fokker_planck_test: d2Gdvpa2_Maxwellian, d2Gdvperp2_Maxwellian, d2Gdvperpdvpa_Maxwellian, dGdvperp_Maxwellian
 using FokkerPlanck.fokker_planck_test: dHdvperp_Maxwellian, dHdvpa_Maxwellian, Cssp_Maxwellian_inputs
 using FokkerPlanck.fokker_planck_calculus: calculate_rosenbluth_potentials_via_elliptic_solve!, calculate_rosenbluth_potential_boundary_data_exact!
-using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_data, rosenbluth_potential_boundary_data
+using FokkerPlanck.fokker_planck_calculus: test_rosenbluth_potential_boundary_data, RosenbluthPotentialBoundaryData
 using FokkerPlanck.fokker_planck_calculus: enforce_vpavperp_BCs!, calculate_rosenbluth_potentials_via_direct_integration!
 using FokkerPlanck.fokker_planck_calculus: interpolate_2D_vspace!, calculate_test_particle_preconditioner!
-using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, fokkerplanck_weakform_arrays_struct,
-                                            fokkerplanck_arrays_direct_integration_struct, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
-                                            convert_rosenbluth_potentials_from_source_to_other_grid!, rosenbluth_potential_data,
-                                            calculate_analytical_Maxwellian_multipole_expansion_moments!, delta_f_multipole_moments
+using FokkerPlanck.fokker_planck_calculus: advance_linearised_test_particle_collisions!, FokkerPlanckWeakformArrays,
+                                            FokkerPlanckArraysDirectIntegration, calculate_rosenbluth_potentials_via_analytical_Maxwellian!,
+                                            convert_rosenbluth_potentials_from_source_to_other_grid!, RosenbluthPotentialData,
+                                            calculate_analytical_Maxwellian_multipole_expansion_moments!, DeltaFMultipoleMoments
 
 function create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=12.0,Lvperp=6.0,bc_vpa=zero_boundary_condition,bc_vperp=zero_boundary_condition)
-
-        # create the 'input' struct containing input info needed to create a
-        # coordinate
-        element_spacing_option = "uniform"
         # create the coordinate structs
-        vperp = finite_element_coordinate("vperp",
-                                scalar_coordinate_inputs(ngrid,
-                                    nelement_vperp,
-                                    Lvperp),
-                                element_spacing_option=element_spacing_option,
-                                bc=bc_vperp)
-        vpa = finite_element_coordinate("vpa",
-                                scalar_coordinate_inputs(ngrid,
-                                    nelement_vpa,
-                                    Lvpa),
-                                    element_spacing_option=element_spacing_option,
+        vperp = FiniteElementCoordinate("vperp",
+                                ScalarCoordinateInputs(ngrid, nelement_vperp,
+                                     0.0, Lvperp, exclude_lower_boundary_point),
+                                bc=bc_vperp, weight_function=((vperp)-> 2.0*pi*vperp))
+        vpa = FiniteElementCoordinate("vpa",
+                                ScalarCoordinateInputs(ngrid, nelement_vpa,
+                                    -0.5*Lvpa, 0.5*Lvpa, include_boundary_points),
                                     bc=bc_vpa)
 
         return vpa, vperp
@@ -92,14 +82,14 @@ function backward_Euler_linearised_collisions_test(;
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=10.0,Lvperp=5.0,
                                                                 bc_vperp=bc_vperp,bc_vpa=bc_vpa)
-    species = species_info([ms],[1.0])
-    fkpl_arrays = fokker_planck_backward_euler_data(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
+    species = SpeciesData([ms],[1.0])
+    fkpl_arrays = FokkerPlanckBackwardEulerData(vpa,vperp,species,boundary_data_option,repeat_assembly_per_species,
                         0.0, 0.0, 0, print_to_screen, nothing, nothing)
-    dummy_array = allocate_float(vpa.n,vperp.n)
-    FMaxwell = allocate_float(vpa.n,vperp.n)
-    FMaxwell_err = allocate_float(vpa.n,vperp.n)
+    dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+    FMaxwell = Array{Float64}(undef,vpa.n,vperp.n)
+    FMaxwell_err = Array{Float64}(undef,vpa.n,vperp.n)
     # make sure to use anyv communicator for any array that is modified in fokker_planck.jl functions
-    pdf = allocate_float(vpa.n,vperp.n)
+    pdf = Array{Float64}(undef,vpa.n,vperp.n)
 
     @inbounds begin
         for ivperp in 1:vperp.n
@@ -229,16 +219,16 @@ function backward_Euler_fokker_planck_self_collisions_test(;
 
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp;
                       Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc_vpa,bc_vperp=bc_vperp)
-    species = species_info([1.0],[1.0])
+    species = SpeciesData([1.0],[1.0])
     nl_solver_atol=1.0e-10
     nl_solver_rtol=0.0
     nl_solver_nonlinear_max_iterations=20
-    fkpl_arrays = fokker_planck_backward_euler_data(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
+    fkpl_arrays = FokkerPlanckBackwardEulerData(vpa,vperp,species,boundary_data_option,multi_species_operator_option,
                         nl_solver_atol,nl_solver_rtol,nl_solver_nonlinear_max_iterations,
                         print_to_screen,nothing,nothing)
 
     # initial condition
-    Fold = allocate_float(vpa.n,vperp.n,species.n)
+    Fold = Array{Float64}(undef,vpa.n,vperp.n,species.n)
     @inbounds begin
         for is in 1:species.n
             for ivperp in 1:vperp.n
@@ -279,13 +269,13 @@ function backward_Euler_fokker_planck_self_collisions_test(;
         end
     end
     # dummy arrays
-    Fdummy1 = allocate_float(vpa.n,vperp.n)
-    Fdummy2 = allocate_float(vpa.n,vperp.n)
-    Fdummy3 = allocate_float(vpa.n,vperp.n)
-    FMaxwell = allocate_float(vpa.n,vperp.n,species.n)
-    density = allocate_float(species.n)
-    upar = allocate_float(species.n)
-    vth = allocate_float(species.n)
+    Fdummy1 = Array{Float64}(undef,vpa.n,vperp.n)
+    Fdummy2 = Array{Float64}(undef,vpa.n,vperp.n)
+    Fdummy3 = Array{Float64}(undef,vpa.n,vperp.n)
+    FMaxwell = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+    density = Array{Float64}(undef,species.n)
+    upar = Array{Float64}(undef,species.n)
+    vth = Array{Float64}(undef,species.n)
     # physics parameters
     nuss = 1.0
     # initial condition
@@ -350,10 +340,10 @@ function backward_Euler_fokker_planck_self_collisions_test(;
     return nothing
 end
 
-function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
-    vpa::finite_element_coordinate,
-    vperp::finite_element_coordinate,
-    species::species_info)
+function get_total_parallel_momentum(ff::Tpdf,
+    vpa::FiniteElementCoordinate,
+    vperp::FiniteElementCoordinate,
+    species::SpeciesData) where Tpdf <: AbstractArray{Float64,3}
     parallel_momentum = 0.0
     for is in 1:species.n
         @views gamma = species.n0ref[is]*(species.c0ref[is]*get_upar(ff[:,:,is],vpa,vperp,1.0)
@@ -363,10 +353,10 @@ function get_total_parallel_momentum(ff::AbstractArray{mk_float,3},
     return parallel_momentum
 end
 
-function get_total_energy(ff::AbstractArray{mk_float,3},
-    vpa::finite_element_coordinate,
-    vperp::finite_element_coordinate,
-    species::species_info)
+function get_total_energy(ff::Tpdf,
+    vpa::FiniteElementCoordinate,
+    vperp::FiniteElementCoordinate,
+    species::SpeciesData) where Tpdf <: AbstractArray{Float64,3}
     energy = 0.0
     for is in 1:species.n
         @views energy += ((species.n0ref[is]*species.c0ref[is]^2)*
@@ -395,12 +385,12 @@ function multi_species_numerical_error_corrections_test(;
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                                                 Lvpa=Lvpa,Lvperp=Lvperp)
     boundary_data_option = multipole_expansion
-    species = species_info([1.0,2.0],[1.0,2.0],c0ref,u0ref,n0ref)
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+    species = SpeciesData([1.0,2.0],[1.0,2.0],c0ref,u0ref,n0ref)
+    fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                         print_to_screen=print_to_screen)
 
-    pdf_new = allocate_float(vpa.n,vperp.n,species.n)
-    pdf_old = allocate_float(vpa.n,vperp.n,species.n)
+    pdf_new = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+    pdf_old = Array{Float64}(undef,vpa.n,vperp.n,species.n)
     # initialise a distribution that has a qpar
     for is in 1:species.n
         for ivperp in 1:vperp.n
@@ -487,19 +477,19 @@ function test_interpolate_2D_vspace(; ngrid=9,
                                 Lvpa=8.0,Lvperp=4.0)
 
     # electron pdf on electron grids
-    Fe = allocate_float(vpa.n,vperp.n)
+    Fe = Array{Float64}(undef,vpa.n,vperp.n)
     # electron pdf on ion normalised grids
-    Fe_interp_ion_units = allocate_float(vpa.n,vperp.n)
+    Fe_interp_ion_units = Array{Float64}(undef,vpa.n,vperp.n)
     # exact value for comparison
-    Fe_exact_ion_units = allocate_float(vpa.n,vperp.n)
+    Fe_exact_ion_units = Array{Float64}(undef,vpa.n,vperp.n)
     # ion pdf on ion grids
-    Fi = allocate_float(vpa.n,vperp.n)
+    Fi = Array{Float64}(undef,vpa.n,vperp.n)
     # ion pdf on electron normalised grids
-    Fi_interp_electron_units = allocate_float(vpa.n,vperp.n)
+    Fi_interp_electron_units = Array{Float64}(undef,vpa.n,vperp.n)
     # exact value for comparison
-    Fi_exact_electron_units = allocate_float(vpa.n,vperp.n)
+    Fi_exact_electron_units = Array{Float64}(undef,vpa.n,vperp.n)
     # test array
-    F_err = allocate_float(vpa.n,vperp.n)
+    F_err = Array{Float64}(undef,vpa.n,vperp.n)
 
     dense = 1.0
     upare = 0.0 # upare in electron reference units
@@ -570,22 +560,22 @@ function test_rosenbluth_potential_grid_conversion(; ngrid=9,
     u0ref = [-0.5, 1.0, 20.0, -30.0, 1.5]
     # reference density in units of nref
     n0ref = [0.9, 1.1, 1.5, 1.4, 0.7]
-    species = species_info(mass,zeds,c0ref,u0ref,n0ref)
+    species = SpeciesData(mass,zeds,c0ref,u0ref,n0ref)
     # moments of pdfs in units of cref, nref
     density = [0.6, 1.5, 0.7, 0.9, 0.8]
     upar = [-0.6, 1.2, 20.1, -30.1, 1.3]
     vth = [0.8*c0ref[1], 1.2*c0ref[2], 1.1*c0ref[3], 1.05*c0ref[4], 0.9*c0ref[5]]
 
     # Rosenbluth potentials on natural grids
-    rosenbluth_potentials_s = Vector{rosenbluth_potential_data}(undef,species.n)
+    rosenbluth_potentials_s = Vector{RosenbluthPotentialData}(undef,species.n)
     # Rosenbluth potentials on grid of another species, analytical
-    rosenbluth_potentials_s_converted_exact = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+    rosenbluth_potentials_s_converted_exact = RosenbluthPotentialData(vpa,vperp,boundary_data_option)
     # Rosenbluth potentials converted from natural grids to grid of another species
-    rosenbluth_potentials_s_converted_numerical = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+    rosenbluth_potentials_s_converted_numerical = RosenbluthPotentialData(vpa,vperp,boundary_data_option)
     # array for testing errors
-    vpavperp_err = allocate_float(vpa.n,vperp.n)
+    vpavperp_err = Array{Float64}(undef,vpa.n,vperp.n)
     for is in 1:species.n
-        rosenbluth_potentials_s[is] = rosenbluth_potential_data(vpa,vperp,boundary_data_option)
+        rosenbluth_potentials_s[is] = RosenbluthPotentialData(vpa,vperp,boundary_data_option)
         # get moments for Rosenbluth potentials on natural grids
         density_in = density[is]/n0ref[is]
         upar_in = (upar[is] - u0ref[is])/c0ref[is]
@@ -686,13 +676,13 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
     upar = [1.0, -0.7, 0.2]
     vth = [1.0,1.0,1.0]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
-            (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,species_info([0.5],[2.0]),),
-                                                (multipole_expansion,species_info([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
-                                                (multipole_expansion,species_info([0.5],[2.0]),zero_boundary_condition,repeat_assembly_per_species),
-                                                (delta_f_multipole,species_info([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
-                                                (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),natural_boundary_condition,single_assembly_per_species),
-                                                (delta_f_multipole,species_info([0.5,1.0],[2.0,1.0]),zero_boundary_condition,repeat_assembly_per_species),
-                                                (delta_f_multipole,species_info([0.5,1.0,2.0],[2.0,-1.0,1.0]),natural_boundary_condition,single_assembly_per_species),
+            (boundary_data_option, species, bc, multi_species_operator_option) in (#(direct_integration,SpeciesData([0.5],[2.0]),),
+                                                (multipole_expansion,SpeciesData([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,SpeciesData([0.5],[2.0]),zero_boundary_condition,repeat_assembly_per_species),
+                                                (delta_f_multipole,SpeciesData([0.5],[2.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (delta_f_multipole,SpeciesData([0.5,1.0],[2.0,1.0]),natural_boundary_condition,single_assembly_per_species),
+                                                (delta_f_multipole,SpeciesData([0.5,1.0],[2.0,1.0]),zero_boundary_condition,repeat_assembly_per_species),
+                                                (delta_f_multipole,SpeciesData([0.5,1.0,2.0],[2.0,-1.0,1.0]),natural_boundary_condition,single_assembly_per_species),
                                                 )
         vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
             Lvpa=10.0,Lvperp=5.0,bc_vpa=bc,bc_vperp=bc)
@@ -700,15 +690,15 @@ function multi_species_fokker_planck_collisions_test(; ngrid=17, nelement_vpa=8,
         @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
             (test_numerical_conserving_terms,) in (false,true)
             println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+            fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                                             multi_species_operator_option=multi_species_operator_option,
                                                             print_to_screen=print_to_screen)
             # arrays for the test
-            F_M = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_num = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_err = allocate_float(vpa.n,vperp.n)
-            dummy_array = allocate_float(vpa.n,vperp.n)
+            F_M = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_num = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_exact = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
             mass = species.mass
             zed = species.zeds
             @. C_M_exact = 0.0
@@ -829,8 +819,8 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
     n0ref2species = [0.9,1.5]
     @testset "boundary_data_option=$boundary_data_option mass=$(species.mass) zeds=$(species.zeds) bc=$(bc) multi_species_operator_option=$(multi_species_operator_option)" for
             (boundary_data_option, species, bc, multi_species_operator_option) in (
-                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
-                                                (multipole_expansion,species_info(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
+                                                (multipole_expansion,SpeciesData(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,single_assembly_per_species),
+                                                (multipole_expansion,SpeciesData(mass2species,zeds2species,c0ref2species,u0ref2species,n0ref2species),natural_boundary_condition,repeat_assembly_per_species),
                                                 )
         vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
             Lvpa=Lvpa,Lvperp=Lvperp,bc_vpa=bc,bc_vperp=bc)
@@ -838,15 +828,15 @@ function multi_species_multi_reference_fokker_planck_collisions_test(;
         @testset "test_numerical_conserving_terms=$test_numerical_conserving_terms" for
             (test_numerical_conserving_terms,) in (false,true)
             println("           - test_numerical_conserving_terms=$test_numerical_conserving_terms")
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+            fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                                             multi_species_operator_option=multi_species_operator_option,
                                                             print_to_screen=print_to_screen)
             # arrays for the test
-            F_M = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_num = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
-            C_M_err = allocate_float(vpa.n,vperp.n)
-            dummy_array = allocate_float(vpa.n,vperp.n)
+            F_M = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_num = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_exact = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+            C_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
             mass = species.mass
             zed = species.zeds
             c0ref = species.c0ref
@@ -968,7 +958,7 @@ function slowing_down_fokker_planck_collisions_test(;
                                 Lvpa=12.0,Lvperp=6.0,bc_vpa=bc,
                                 bc_vperp=bc)
     boundary_data_option=multipole_expansion
-    species = species_info([1.0], # mass of evolved species
+    species = SpeciesData([1.0], # mass of evolved species
                             [2.0]) # Z of evolved species
     nuref = 1.0/16.0 # reference collision frequency
     # parameters of fixed background species
@@ -982,7 +972,7 @@ function slowing_down_fokker_planck_collisions_test(;
         println("        - multi_species_operator_option=$multi_species_operator_option bc=$bc pdf_input=$pdf_input")
         if pdf_input
             nsprime = length(msp)
-            Fsp_M = allocate_float(vpa.n,vperp.n,nsprime)
+            Fsp_M = Array{Float64}(undef,vpa.n,vperp.n,nsprime)
             for isp in 1:nsprime
                 for ivperp in 1:vperp.n
                     for ivpa in 1:vpa.n
@@ -990,19 +980,19 @@ function slowing_down_fokker_planck_collisions_test(;
                     end
                 end
             end
-            fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,Fsp_M)
+            fixed_background_plasma_in = FixedBackgroundPlasmaInput(msp,Zsp,Fsp_M)
         else
-            fixed_background_plasma_in = fixed_background_plasma_input(msp,Zsp,denssp,uparsp,vthsp)
+            fixed_background_plasma_in = FixedBackgroundPlasmaInput(msp,Zsp,denssp,uparsp,vthsp)
         end
-        fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+        fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                 multi_species_operator_option=multi_species_operator_option,
                                 print_to_screen=print_to_screen,
                                 fixed_background_plasma_in=fixed_background_plasma_in)
-        dummy_array = allocate_float(vpa.n,vperp.n)
-        Fs_M = allocate_float(vpa.n,vperp.n,species.n)
-        C_M_num = allocate_float(vpa.n,vperp.n,species.n)
-        C_M_exact = allocate_float(vpa.n,vperp.n,species.n)
-        C_M_err = allocate_float(vpa.n,vperp.n)
+        dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+        Fs_M = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+        C_M_num = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+        C_M_exact = Array{Float64}(undef,vpa.n,vperp.n,species.n)
+        C_M_err = Array{Float64}(undef,vpa.n,vperp.n)
 
         # pick a set of parameters that represent slowing down
         # on slow ions and faster electrons, but which are close
@@ -1083,38 +1073,38 @@ function rosenbluth_potential_solver_test(;
                     print_to_screen=false)
     vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                 Lvpa=12.0,Lvperp=6.0)
-    species = species_info([1.0],[1.0])
-    fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+    species = SpeciesData([1.0],[1.0])
+    fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                                             print_to_screen=print_to_screen)
-    dummy_array = allocate_float(vpa.n,vperp.n)
-    F_M = allocate_float(vpa.n,vperp.n)
-    H_M_exact = allocate_float(vpa.n,vperp.n)
-    H_M_num = allocate_float(vpa.n,vperp.n)
-    H_M_err = allocate_float(vpa.n,vperp.n)
-    G_M_exact = allocate_float(vpa.n,vperp.n)
-    G_M_num = allocate_float(vpa.n,vperp.n)
-    G_M_err = allocate_float(vpa.n,vperp.n)
-    d2Gdvpa2_M_exact = allocate_float(vpa.n,vperp.n)
-    d2Gdvpa2_M_num = allocate_float(vpa.n,vperp.n)
-    d2Gdvpa2_M_err = allocate_float(vpa.n,vperp.n)
-    d2Gdvperp2_M_exact = allocate_float(vpa.n,vperp.n)
-    d2Gdvperp2_M_num = allocate_float(vpa.n,vperp.n)
-    d2Gdvperp2_M_err = allocate_float(vpa.n,vperp.n)
-    dGdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-    dGdvperp_M_num = allocate_float(vpa.n,vperp.n)
-    dGdvperp_M_err = allocate_float(vpa.n,vperp.n)
-    d2Gdvperpdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-    d2Gdvperpdvpa_M_num = allocate_float(vpa.n,vperp.n)
-    d2Gdvperpdvpa_M_err = allocate_float(vpa.n,vperp.n)
-    dHdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-    dHdvpa_M_num = allocate_float(vpa.n,vperp.n)
-    dHdvpa_M_err = allocate_float(vpa.n,vperp.n)
-    dHdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-    dHdvperp_M_num = allocate_float(vpa.n,vperp.n)
-    dHdvperp_M_err = allocate_float(vpa.n,vperp.n)
-    Inm_vec = allocate_float(25)
-    Inm_vec_exact = allocate_float(25)
-    Inm_vec_err = allocate_float(25)
+    dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+    F_M = Array{Float64}(undef,vpa.n,vperp.n)
+    H_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    H_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    H_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    G_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    G_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    G_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvpa2_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvpa2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvpa2_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperp2_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperp2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperp2_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    dGdvperp_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    dGdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    dGdvperp_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    d2Gdvperpdvpa_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvpa_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvpa_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvperp_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+    dHdvperp_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+    Inm_vec = Array{Float64}(undef,25)
+    Inm_vec_exact = Array{Float64}(undef,25)
+    Inm_vec_err = Array{Float64}(undef,25)
 
     dens, upar, vth = 0.8, 0.99, 1.01
 
@@ -1131,7 +1121,7 @@ function rosenbluth_potential_solver_test(;
             dHdvperp_M_exact[ivpa,ivperp] = dHdvperp_Maxwellian(dens,upar,vth,vpa.grid[ivpa],vperp.grid[ivperp])
         end
     end
-    rpbd_exact = rosenbluth_potential_boundary_data(vpa,vperp)
+    rpbd_exact = RosenbluthPotentialBoundaryData(vpa,vperp)
     # use known test function to provide exact data
 
     calculate_rosenbluth_potential_boundary_data_exact!(rpbd_exact,
@@ -1167,7 +1157,7 @@ function rosenbluth_potential_solver_test(;
                                                                     dens,upar,vth)
             Inm_vec .= fkpl_arrays.rosenbluth_potentials.multipole_expansion_moments
         elseif boundary_data_option == delta_f_multipole
-            expansion_data_exact = delta_f_multipole_moments(Inm_vec_exact,[0.0,0.0,0.0])
+            expansion_data_exact = DeltaFMultipoleMoments(Inm_vec_exact,[0.0,0.0,0.0])
             calculate_analytical_Maxwellian_multipole_expansion_moments!(expansion_data_exact,
                                                                     dens,upar,vth)
             Inm_vec_exact = expansion_data_exact.Inm_vec
@@ -1321,26 +1311,26 @@ function runtests()
                                                     Lvpa=2.0,Lvperp=1.0)
             nc_global = vpa.n*vperp.n
             boundary_data_option = multipole_expansion
-            species = species_info([1.0],[1.0])
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+            species = SpeciesData([1.0],[1.0])
+            fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                                     print_to_screen=print_to_screen)
             matrix_operators = fkpl_arrays.fprp_solver_data.matrix_operators
             KKpar2D_with_BC_terms_sparse = matrix_operators.KKpar2D_with_BC_terms_sparse
             KKperp2D_with_BC_terms_sparse = matrix_operators.KKperp2D_with_BC_terms_sparse
             lu_obj_MM = matrix_operators.lu_obj_MM
 
-            dummy_array = allocate_float(vpa.n,vperp.n)
-            fvpavperp = allocate_float(vpa.n,vperp.n)
-            fvpavperp_test = allocate_float(vpa.n,vperp.n)
-            fvpavperp_err = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvpa2_exact = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvpa2_err = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvpa2_num = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvperp2_exact = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvperp2_err = allocate_float(vpa.n,vperp.n)
-            d2fvpavperp_dvperp2_num = allocate_float(vpa.n,vperp.n)
-            dfc = allocate_float(nc_global)
-            dgc = allocate_float(nc_global)
+            dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+            fvpavperp = Array{Float64}(undef,vpa.n,vperp.n)
+            fvpavperp_test = Array{Float64}(undef,vpa.n,vperp.n)
+            fvpavperp_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvpa2_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvpa2_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvpa2_num = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvperp2_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvperp2_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2fvpavperp_dvperp2_num = Array{Float64}(undef,vpa.n,vperp.n)
+            dfc = Array{Float64}(undef,nc_global)
+            dgc = Array{Float64}(undef,nc_global)
             for ivperp in 1:vperp.n
                 for ivpa in 1:vpa.n
                     fvpavperp[ivpa,ivperp] = exp(-vpa.grid[ivpa]^2 - vperp.grid[ivperp]^2)
@@ -1394,8 +1384,8 @@ function runtests()
                                     bc_vpa=natural_boundary_condition,
                                     bc_vperp=natural_boundary_condition)
             boundary_data_option=direct_integration
-            species = species_info([1.0],[1.0])
-            fkpl_arrays = fokkerplanck_weakform_arrays_struct(vpa,vperp,species,boundary_data_option,
+            species = SpeciesData([1.0],[1.0])
+            fkpl_arrays = FokkerPlanckWeakformArrays(vpa,vperp,species,boundary_data_option,
                                                         print_to_screen=print_to_screen)
 
             @testset "test_self_operator=$test_self_operator test_numerical_conserving_terms=$test_numerical_conserving_terms use_Maxwellian_Rosenbluth_coefficients=$use_Maxwellian_Rosenbluth_coefficients algebraic_solve_for_d2Gdvperp2=$algebraic_solve_for_d2Gdvperp2" for
@@ -1405,12 +1395,12 @@ function runtests()
                                                          (true,true,false,false),
                                                          (true,false,true,false),(true,false,false,true))
 
-                dummy_array = allocate_float(vpa.n,vperp.n)
-                Fs_M = allocate_float(vpa.n,vperp.n)
-                F_M = allocate_float(vpa.n,vperp.n)
-                C_M_num = allocate_float(vpa.n,vperp.n)
-                C_M_exact = allocate_float(vpa.n,vperp.n)
-                C_M_err = allocate_float(vpa.n,vperp.n)
+                dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+                Fs_M = Array{Float64}(undef,vpa.n,vperp.n)
+                F_M = Array{Float64}(undef,vpa.n,vperp.n)
+                C_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+                C_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+                C_M_err = Array{Float64}(undef,vpa.n,vperp.n)
                 if test_self_operator
                     dens, upar, vth = 1.0, 1.0, 1.0
                     denss, upars, vths = dens, upar, vth
@@ -1572,34 +1562,34 @@ function runtests()
             vpa, vperp = create_grids(ngrid,nelement_vpa,nelement_vperp,
                                             Lvpa=12.0,Lvperp=6.0)
 
-            fkpl_arrays = fokkerplanck_arrays_direct_integration_struct(vperp,vpa;
-                                                    print_to_screen=print_to_screen)
-            dummy_array = allocate_float(vpa.n,vperp.n)
-            F_M = allocate_float(vpa.n,vperp.n)
-            H_M_exact = allocate_float(vpa.n,vperp.n)
-            H_M_num = allocate_float(vpa.n,vperp.n)
-            H_M_err = allocate_float(vpa.n,vperp.n)
-            G_M_exact = allocate_float(vpa.n,vperp.n)
-            G_M_num = allocate_float(vpa.n,vperp.n)
-            G_M_err = allocate_float(vpa.n,vperp.n)
-            d2Gdvpa2_M_exact = allocate_float(vpa.n,vperp.n)
-            d2Gdvpa2_M_num = allocate_float(vpa.n,vperp.n)
-            d2Gdvpa2_M_err = allocate_float(vpa.n,vperp.n)
-            d2Gdvperp2_M_exact = allocate_float(vpa.n,vperp.n)
-            d2Gdvperp2_M_num = allocate_float(vpa.n,vperp.n)
-            d2Gdvperp2_M_err = allocate_float(vpa.n,vperp.n)
-            dGdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-            dGdvperp_M_num = allocate_float(vpa.n,vperp.n)
-            dGdvperp_M_err = allocate_float(vpa.n,vperp.n)
-            d2Gdvperpdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-            d2Gdvperpdvpa_M_num = allocate_float(vpa.n,vperp.n)
-            d2Gdvperpdvpa_M_err = allocate_float(vpa.n,vperp.n)
-            dHdvpa_M_exact = allocate_float(vpa.n,vperp.n)
-            dHdvpa_M_num = allocate_float(vpa.n,vperp.n)
-            dHdvpa_M_err = allocate_float(vpa.n,vperp.n)
-            dHdvperp_M_exact = allocate_float(vpa.n,vperp.n)
-            dHdvperp_M_num = allocate_float(vpa.n,vperp.n)
-            dHdvperp_M_err = allocate_float(vpa.n,vperp.n)
+            fkpl_arrays = FokkerPlanckArraysDirectIntegration(vperp,vpa;
+                                        print_to_screen=print_to_screen)
+            dummy_array = Array{Float64}(undef,vpa.n,vperp.n)
+            F_M = Array{Float64}(undef,vpa.n,vperp.n)
+            H_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            H_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            H_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            G_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            G_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            G_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvpa2_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvpa2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvpa2_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperp2_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperp2_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperp2_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            dGdvperp_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            dGdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            dGdvperp_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperpdvpa_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperpdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            d2Gdvperpdvpa_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvpa_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvpa_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvpa_M_err = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvperp_M_exact = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvperp_M_num = Array{Float64}(undef,vpa.n,vperp.n)
+            dHdvperp_M_err = Array{Float64}(undef,vpa.n,vperp.n)
 
             dens, upar, vth = 1.0, 1.0, 1.0
             for ivperp in 1:vperp.n

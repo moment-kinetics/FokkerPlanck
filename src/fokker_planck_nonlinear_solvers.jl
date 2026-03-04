@@ -9,13 +9,12 @@ import JacobianFreeNewtonKrylov: distributed_norm,
                                  parallel_map,
                                  parallel_delta_x_calc
 using JacobianFreeNewtonKrylov: nl_solver_info
-using ..coordinates: finite_element_coordinate
-using ..type_definitions: mk_float, mk_int
+using FiniteElementAssembly: FiniteElementCoordinate
 
 function distributed_norm(
                                ::Val{:speciesvperpvpa},
-                               residual::AbstractArray{mk_float, 3},
-                               coords, rtol, atol, x::AbstractArray{mk_float, 3})
+                               residual::AbstractArray{Float64, 3},
+                               coords, rtol, atol, x::AbstractArray{Float64, 3})
     pdf_residual = residual
     x_pdf = x
     species = coords.species
@@ -38,9 +37,9 @@ function distributed_norm(
 end
 
 function distributed_dot(
-                  ::Val{:speciesvperpvpa}, v::AbstractArray{mk_float, 3},
-                  w::AbstractArray{mk_float, 3}, coords,
-                  rtol, atol, x::AbstractArray{mk_float, 3})
+                  ::Val{:speciesvperpvpa}, v::AbstractArray{Float64, 3},
+                  w::AbstractArray{Float64, 3}, coords,
+                  rtol, atol, x::AbstractArray{Float64, 3})
     v_pdf = v
     w_pdf = w
     x_pdf = x
@@ -64,7 +63,7 @@ function distributed_dot(
 end
 
 function parallel_map(
-                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{mk_float, 3})
+                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{Float64, 3})
 
     result_pdf = result
     nvpa, nvperp, nspecies = size(result)
@@ -80,7 +79,7 @@ function parallel_map(
     return nothing
 end
 function parallel_map(
-                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{mk_float, 3},
+                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{Float64, 3},
                   x1)
 
     result_pdf = result
@@ -98,7 +97,7 @@ function parallel_map(
     return nothing
 end
 function parallel_map(
-                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{mk_float, 3},
+                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{Float64, 3},
                   x1, x2)
 
     result_pdf = result
@@ -129,7 +128,7 @@ function parallel_map(
     return nothing
 end
 function parallel_map(
-                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{mk_float, 3},
+                  ::Val{:speciesvperpvpa}, func, result::AbstractArray{Float64, 3},
                   x1, x2, x3)
 
     result_pdf = result
@@ -162,7 +161,7 @@ function parallel_map(
 end
 
 function parallel_delta_x_calc(
-                  ::Val{:speciesvperpvpa}, delta_x::AbstractArray{mk_float, 3}, V,
+                  ::Val{:speciesvperpvpa}, delta_x::AbstractArray{Float64, 3}, V,
                   y)
 
     delta_x_pdf = delta_x

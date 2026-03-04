@@ -1,44 +1,42 @@
-using FokkerPlanck.array_allocation: allocate_float
-using FokkerPlanck.type_definitions: mk_float, mk_int
 using FokkerPlanck: calculate_entropy_production
-using FokkerPlanck.coordinates: scalar_coordinate_inputs,
+using FiniteElementAssembly: ScalarCoordinateInputs,
                             set_element_boundaries,
                             set_element_scale_and_shift,
-                            finite_element_coordinate,
-                            finite_element_boundary_condition_type,
-                            zero_boundary_condition, natural_boundary_condition
+                            FiniteElementCoordinate, AbstractBoundaryCondition,
+                            include_boundary_points, exclude_lower_boundary_point
+using FokkerPlanck.fokker_planck_calculus: zero_boundary_condition, natural_boundary_condition
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_pressure, get_ppar, get_qpar, get_rmom
-using FokkerPlanck.fokker_planck_calculus: species_info
+using FokkerPlanck.fokker_planck_calculus: SpeciesData
 using FokkerPlanck: ElementCoordinates # from FiniteElementMatrices, re-exported via FokkerPlanck
 using Printf
 
 struct moments_struct
-    density::Vector{mk_float}
-    upar::Vector{mk_float}
-    vth::Vector{mk_float}
-    pressure::Vector{mk_float}
-    temperature::Vector{mk_float}
-    ppar::Vector{mk_float}
-    qpar::Vector{mk_float}
-    rmom::Vector{mk_float}
-    conserved::Vector{mk_float}
-    function moments_struct(nspecies::mk_int)
-        density = allocate_float(nspecies)
-        upar = allocate_float(nspecies)
-        vth = allocate_float(nspecies)
-        pressure = allocate_float(nspecies)
-        temperature = allocate_float(nspecies)
-        ppar = allocate_float(nspecies)
-        qpar = allocate_float(nspecies)
-        rmom = allocate_float(nspecies)
-        conserved = allocate_float(nspecies+2)
+    density::Vector{Float64}
+    upar::Vector{Float64}
+    vth::Vector{Float64}
+    pressure::Vector{Float64}
+    temperature::Vector{Float64}
+    ppar::Vector{Float64}
+    qpar::Vector{Float64}
+    rmom::Vector{Float64}
+    conserved::Vector{Float64}
+    function moments_struct(nspecies::Int64)
+        density = Array{Float64}(undef,nspecies)
+        upar = Array{Float64}(undef,nspecies)
+        vth = Array{Float64}(undef,nspecies)
+        pressure = Array{Float64}(undef,nspecies)
+        temperature = Array{Float64}(undef,nspecies)
+        ppar = Array{Float64}(undef,nspecies)
+        qpar = Array{Float64}(undef,nspecies)
+        rmom = Array{Float64}(undef,nspecies)
+        conserved = Array{Float64}(undef,nspecies+2)
         return new(density, upar, vth, pressure,
             temperature, ppar, qpar, rmom, conserved)
     end
 end
 
-function calculate_total_parallel_momentum(moments::moments_struct,species::species_info)
+function calculate_total_parallel_momentum(moments::moments_struct,species::SpeciesData)
     parallel_momentum = 0.0
     for is in 1:species.n
         parallel_momentum += species.mass[is]*moments.density[is]*moments.upar[is]
@@ -46,7 +44,7 @@ function calculate_total_parallel_momentum(moments::moments_struct,species::spec
     return parallel_momentum
 end
 
-function calculate_total_energy(moments::moments_struct,species::species_info)
+function calculate_total_energy(moments::moments_struct,species::SpeciesData)
     total_energy = 0.0
     for is in 1:species.n
         total_energy += (0.5*species.mass[is]*moments.density[is]*(moments.upar[is]^2)
@@ -73,9 +71,10 @@ function calculate_total_change(CCs,fkpl_arrays)
     return total_momentum_change, total_energy_change
 end
 
-function get_moments(pdf::AbstractArray{mk_float,2},
-    vpa::finite_element_coordinate,vperp::finite_element_coordinate,
-    mass::mk_float,c0ref::mk_float,u0ref::mk_float,n0ref::mk_float)
+function get_moments(pdf::Tpdf,
+    vpa::FiniteElementCoordinate,vperp::FiniteElementCoordinate,
+    mass::Float64,c0ref::Float64,u0ref::Float64,n0ref::Float64
+    ) where Tpdf <: AbstractArray{Float64,2}
     dens = get_density(pdf,vpa,vperp)
     if abs(dens) < 1.0e-14
         density, upar, pressure, temperature, vth, ppar, qpar, rmom = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -93,15 +92,14 @@ function get_moments(pdf::AbstractArray{mk_float,2},
     return density, upar, vth, pressure, temperature, ppar, qpar, rmom
 end
 
-function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
-                    pdf::AbstractArray{mk_float,3},
-                    pdf_exact::AbstractArray{mk_float,3},
-                    pdf_dummy_1::AbstractArray{mk_float,2},
-                    pdf_dummy_2::AbstractArray{mk_float,2},
-                    fkpl_arrays::fokkerplanck_weakform_arrays_struct,
+function diagnose_F_Maxwellian(CC::Tpdf1, pdf::Tpdf2, pdf_exact::Tpdf3,
+                    pdf_dummy_1::Tpdf4, pdf_dummy_2::Tpdf5,
+                    fkpl_arrays::FokkerPlanckWeakformArrays,
                     moments::moments_struct,
-                    time::mk_float,
-                    it::mk_int; updated_CC=true)
+                    time::Float64, it::Int64; updated_CC=true
+                    ) where {Tpdf1 <: AbstractArray{Float64,3},Tpdf2 <: AbstractArray{Float64,3},
+                    Tpdf3 <: AbstractArray{Float64,3}, Tpdf4 <: AbstractArray{Float64,2},
+                    Tpdf5 <: AbstractArray{Float64,2}}
     # extract coordinates
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
@@ -175,8 +173,8 @@ function diagnose_F_Maxwellian(CC::AbstractArray{mk_float,3},
     end
 end
 
-function chebyshevpoints(n::mk_int;radau=false)
-    grid = allocate_float(n)
+function chebyshevpoints(n::Int64;radau=false)
+    grid = Array{Float64}(undef,n)
     if radau # exclude lower endpoint, grid ∈ (-1,1]
         nfac = 1.0/(n-0.5)
     else # include endpoints, grid ∈ [-1,1]
@@ -191,12 +189,11 @@ function chebyshevpoints(n::mk_int;radau=false)
 end
 
 function chebyshev_grid(name::String,
-                    input::scalar_coordinate_inputs)
+                    input::ScalarCoordinateInputs)
     ngrid = input.ngrid
     nelement = input.nelement
-    Ldomain = input.Ldomain
     # set vpa domain to be [-Ldomain/2,Ldomain/2], or set vperp domain to be [0, Ldomain]
-    element_boundaries = set_element_boundaries(nelement, Ldomain, "uniform", name)
+    element_boundaries = set_element_boundaries(input)
     # extract transformation factors such that v = scale * x + shift
     # with x the local reference grid value in [-1,1] (or (-1,1] for Radau elements)).
     element_scale, element_shift = set_element_scale_and_shift(element_boundaries)
@@ -218,13 +215,13 @@ function chebyshev_grid(name::String,
     return element_data
 end
 
-function set_initial_pdf!(Fold::AbstractArray{mk_float,2},
-            vpa::finite_element_coordinate,
-            vperp::finite_element_coordinate,
-            vpa0::mk_float,
-            vperp0::mk_float,
-            vth0::mk_float,
-            zbeam::mk_float)
+function set_initial_pdf!(Fold::Tpdf,
+            vpa::FiniteElementCoordinate,
+            vperp::FiniteElementCoordinate,
+            vpa0::Float64,
+            vperp0::Float64,
+            vth0::Float64,
+            zbeam::Float64) where Tpdf <: AbstractArray{Float64,2}
     @inbounds begin
         for ivperp in 1:vperp.n
             for ivpa in 1:vpa.n
@@ -269,7 +266,7 @@ function print_grid(coord)
     return nothing
 end
 
-function print_pdf(pdf::AbstractArray{mk_float,4})
+function print_pdf(pdf::Tpdf) where Tpdf <: AbstractArray{Float64,4}
     println("# Expected Fout")
     print("[")
     nvpa, nvperp, nspecies, ntind = size(pdf)
@@ -299,7 +296,7 @@ function print_pdf(pdf::AbstractArray{mk_float,4})
 end
 
 struct pdf_and_grid
-    vpa_grid::Vector{mk_float}
-    vperp_grid::Vector{mk_float}
-    pdf::AbstractArray{mk_float,4}
+    vpa_grid::Vector{Float64}
+    vperp_grid::Vector{Float64}
+    pdf::Array{Float64,4}
 end

@@ -1,9 +1,9 @@
 module VelocityIntegralTests
 
 using Test: @testset, @test
-using FokkerPlanck.coordinates: finite_element_coordinate, scalar_coordinate_inputs
+using FiniteElementAssembly: FiniteElementCoordinate, ScalarCoordinateInputs,
+        include_boundary_points, exclude_lower_boundary_point
 using FokkerPlanck.velocity_moments: get_density, get_upar, get_ppar, get_pressure
-using FokkerPlanck.array_allocation: allocate_float
 
 function runtests()
     @testset "velocity integral tests" begin
@@ -17,27 +17,19 @@ function runtests()
         nelement = 20 # number of elements per rank
         Lvpa = 18.0 #physical box size in reference units 
         Lvperp = 9.0 #physical box size in reference units 
-        element_spacing_option = "uniform"
         # create the coordinate structs
-        vr = finite_element_coordinate("vperp1d", scalar_coordinate_inputs(1,
-                                1,
-                                1.0),
-                                element_spacing_option=element_spacing_option)
-        vz = finite_element_coordinate("vpa1d", scalar_coordinate_inputs(ngrid,
-                                nelement,
-                                Lvpa),
-                                element_spacing_option=element_spacing_option)
-        vperp = finite_element_coordinate("vperp", scalar_coordinate_inputs(ngrid,
-                                nelement,
-                                Lvperp),
-                                element_spacing_option=element_spacing_option)
-        vpa = finite_element_coordinate("vpa", scalar_coordinate_inputs(ngrid,
-                                nelement,
-                                Lvpa),
-                                element_spacing_option=element_spacing_option)
+        vr = FiniteElementCoordinate("vperp1d", ScalarCoordinateInputs(1, 1,
+                                1.0, 1.0, include_boundary_points))
+        vz = FiniteElementCoordinate("vpa1d", ScalarCoordinateInputs(ngrid, nelement,
+                                -0.5*Lvpa, 0.5*Lvpa, include_boundary_points))
+        vperp = FiniteElementCoordinate("vperp", ScalarCoordinateInputs(ngrid, nelement,
+                                0.0, Lvperp, exclude_lower_boundary_point),
+                                weight_function = ((vperp) -> 2.0*pi*vperp))
+        vpa = FiniteElementCoordinate("vpa", ScalarCoordinateInputs(ngrid, nelement,
+                                -0.5*Lvpa, 0.5*Lvpa, include_boundary_points))
         
-        dfn = allocate_float(vpa.n,vperp.n)
-        dfn1D = allocate_float(vz.n, vr.n)
+        dfn = Array{Float64}(undef,vpa.n,vperp.n)
+        dfn1D = Array{Float64}(undef,vz.n, vr.n)
 
         function pressure(ppar,pperp)
             pres = (1.0/3.0)*(ppar + 2.0*pperp) 
