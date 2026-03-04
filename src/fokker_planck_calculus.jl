@@ -50,7 +50,7 @@ using FiniteElementMatrices: lagrange_x,
                              finite_element_matrix,
                              ElementCoordinates
 using FiniteElementAssembly: first_derivative!, FiniteElementCoordinate, ScalarCoordinateInputs,
-        BoundaryConditionType, NaturalBC, DirichletBC, assemble_operator, integral, get_ielement,
+        AbstractBoundaryCondition, NaturalBC, DirichletBC, assemble_operator, integral, get_ielement,
         value_in_coordinate_domain
 
 using JacobianFreeNewtonKrylov: nl_solver_info
@@ -109,7 +109,7 @@ struct FokkerPlanckArraysDirectIntegration
     """
     function FokkerPlanckArraysDirectIntegration(vperp::FiniteElementCoordinate,
                                                         vpa::FiniteElementCoordinate;
-                                                        print_to_screen=false::Bool)
+                                                        print_to_screen::Bool=false)
 
         G0_weights = Array{Float64}(undef,vpa.n,vperp.n,vpa.n,vperp.n)
         G1_weights = Array{Float64}(undef,vpa.n,vperp.n,vpa.n,vperp.n)
@@ -784,9 +784,9 @@ struct FokkerPlanckWeakformArrays
                 vperp::FiniteElementCoordinate,
                 species::SpeciesData,
                 boundary_data_option::boundary_data_type;
-                multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-                print_to_screen=true::Bool,
-                fixed_background_plasma_in=nothing::Union{FixedBackgroundPlasmaInput,Nothing})
+                multi_species_operator_option::multi_species_operator_type=single_assembly_per_species,
+                print_to_screen::Bool=true,
+                fixed_background_plasma_in::Union{FixedBackgroundPlasmaInput,Nothing}=nothing)
         YY_arrays = CollisionOperatorArrays(vpa,vperp)
         fprp_solver_data = FokkerPlanckRosenbluthPotentialSolverData(vpa,vperp,
                                 YY_arrays,boundary_data_option,print_to_screen=print_to_screen)
@@ -1030,16 +1030,17 @@ struct FokkerPlanckBackwardEulerData{TFloat<:Float64,
         n0refs::Vector{Float64},
         inputs_vpa::Union{ScalarCoordinateInputs,Array{ElementCoordinates,1}},
         inputs_vperp::Union{ScalarCoordinateInputs,Array{ElementCoordinates,1}};
-        bc_vpa=natural_boundary_condition::BoundaryConditionType,
-        bc_vperp=natural_boundary_condition::BoundaryConditionType,
-        boundary_data_option=multipole_expansion::boundary_data_type,
-        multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-        nl_solver_atol=1.0e-10::Float64,
-        nl_solver_rtol=0.0::Float64,
-        nl_solver_nonlinear_max_iterations=20::Int64,
-        print_to_screen=true::Bool,
-        fixed_background_plasma_in=nothing::Union{FixedBackgroundPlasmaInput,Nothing},
-        source_data_in=nothing::Union{SlowingDownSourceInput,Nothing})
+        bc_vpa::Tbc_vpa=natural_boundary_condition,
+        bc_vperp::Tbc_vperp=natural_boundary_condition,
+        boundary_data_option::boundary_data_type=multipole_expansion,
+        multi_species_operator_option::multi_species_operator_type=single_assembly_per_species,
+        nl_solver_atol::Float64=1.0e-10,
+        nl_solver_rtol::Float64=0.0,
+        nl_solver_nonlinear_max_iterations::Int64=20,
+        print_to_screen::Bool=true,
+        fixed_background_plasma_in::Union{FixedBackgroundPlasmaInput,Nothing}=nothing,
+        source_data_in::Union{SlowingDownSourceInput,Nothing}=nothing
+        ) where {Tbc_vpa <: AbstractBoundaryCondition, Tbc_vperp <: AbstractBoundaryCondition}
         # create the coordinate structs from the input data
         vperp = FiniteElementCoordinate("vperp", inputs_vperp,
                                     bc=bc_vperp, weight_function=((vperp)-> 2.0*pi*vperp))
@@ -3535,8 +3536,8 @@ function convert_rosenbluth_potentials_from_source_to_other_grid!(
             vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate,
             c0ref_source::Float64, u0ref_source::Float64,
             c0ref_other::Float64, u0ref_other::Float64;
-            calculate_GG=false::Bool,calculate_dGdvperp=false::Bool,
-            calculate_HH=false::Bool,test_identity_conversion=false::Bool)
+            calculate_GG::Bool=false,calculate_dGdvperp::Bool=false,
+            calculate_HH::Bool=false,test_identity_conversion::Bool=false)
     # denote source grid with s, other grid with s' = sp
     c0refs = c0ref_source
     u0refs = u0ref_source

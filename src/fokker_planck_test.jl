@@ -432,7 +432,7 @@ function print_test_data(func_exact::Tpdf1,
             func_name::String,
             vpa::FiniteElementCoordinate,
             vperp::FiniteElementCoordinate,
-            dummy::Tpdf4; print_to_screen=true::Bool
+            dummy::Tpdf4; print_to_screen::Bool=true
             ) where {Tpdf <: AbstractArray{Float64,2},
             Tpdf1 <: Tpdf, Tpdf2 <: Tpdf, Tpdf3 <: Tpdf, Tpdf4 <: Tpdf}
     @. func_err = abs(func_num - func_exact)

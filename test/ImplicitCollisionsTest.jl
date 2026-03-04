@@ -15,29 +15,30 @@ end
 include(joinpath(@__DIR__,"ImplicitCollisionsTestBase.jl"))
 function test_implicit_collisions(;
     # initial pdf info
-    vth0=0.5::Float64, vperp0=1.0::Float64, vpa0=0.0::Float64, zbeam=0.0::Float64, nspecies=1::Int64,
+    vth0::Float64=0.5, vperp0::Float64=1.0, vpa0::Float64=0.0, zbeam::Float64=0.0, nspecies::Int64=1,
     # grid info
-    ngrid=3::Int64, nelement_vpa=8::Int64, nelement_vperp=4::Int64,
-    Lvpa=6.0::Float64, Lvperp=3.0::Float64,
+    ngrid::Int64=3, nelement_vpa::Int64=8, nelement_vperp::Int64=4,
+    Lvpa::Float64=6.0, Lvperp::Float64=3.0,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::BoundaryConditionType,
-    bc_vperp=natural_boundary_condition::BoundaryConditionType,
+    bc_vpa::Tbc_vpa=natural_boundary_condition,
+    bc_vperp::Tbc_vperp=natural_boundary_condition,
     # time advance info
-    ntime=1::Int64,delta_t=1.0::Float64,
+    ntime::Int64=1,delta_t::Float64=1.0,
     # nonlinea r solver options
-    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
-    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
+    atol::Float64 = 1.0e-10, rtol::Float64 = 0.0,
+    nonlinear_max_iterations::Int64 = 20, test_particle_preconditioner::Bool=true,
     # model options
-    test_linearised_advance=false::Bool,
-    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
-    test_numerical_conserving_terms=false::Bool,
-    boundary_data_option=multipole_expansion::boundary_data_type,
-    multi_species_operator_option=repeat_assembly_per_species::multi_species_operator_type,
-    test_external_chebyshev_grid=false::Bool,
-    print_diagnostics=true::Bool, print_timing=true::Bool,
-    test_type=interactive_test::CollisionTestReturnType,
+    test_linearised_advance::Bool=false,
+    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner::Bool=false,
+    test_numerical_conserving_terms::Bool=false,
+    boundary_data_option::boundary_data_type=multipole_expansion,
+    multi_species_operator_option::multi_species_operator_type=repeat_assembly_per_species,
+    test_external_chebyshev_grid::Bool=false,
+    print_diagnostics::Bool=true, print_timing::Bool=true,
+    test_type::CollisionTestReturnType=interactive_test,
     # if external user, may pass a slice of an array into functions
-    test_input_array_type=false::Bool)
+    test_input_array_type::Bool=false
+    ) where {Tbc_vpa <: AbstractBoundaryCondition, Tbc_vperp <: AbstractBoundaryCondition}
     vth0_range = [vth0 for is in 1:nspecies]
     vperp0_range = [vperp0 for is in 1:nspecies]
     vpa0_range = [vpa0 for is in 1:nspecies]
@@ -81,33 +82,34 @@ end
 
 function test_multispecies_implicit_collisions(;
     # initial pdf info
-    vth0=[0.5,0.5]::Vector{Float64}, vperp0=[1.0,1.0]::Vector{Float64}, vpa0=[0.0,0.0]::Vector{Float64}, zbeam=[0.0,0.0]::Vector{Float64},
+    vth0::Vector{Float64}=[0.5,0.5], vperp0::Vector{Float64}=[1.0,1.0], vpa0::Vector{Float64}=[0.0,0.0], zbeam::Vector{Float64}=[0.0,0.0],
     # species info
-    mass=[1.0,1.0]::Vector{Float64}, zeds=[1.0,1.0]::Vector{Float64}, c0ref=[1.0,1.0]::Vector{Float64},
-    u0ref=[0.0,0.0]::Vector{Float64}, n0ref=[1.0,1.0]::Vector{Float64}, density_in=[1.0,1.0]::Vector{Float64},
+    mass::Vector{Float64}=[1.0,1.0], zeds::Vector{Float64}=[1.0,1.0], c0ref::Vector{Float64}=[1.0,1.0],
+    u0ref::Vector{Float64}=[0.0,0.0], n0ref::Vector{Float64}=[1.0,1.0], density_in::Vector{Float64}=[1.0,1.0],
     # grid info
-    ngrid=3::Int64, nelement_vpa=8::Int64, nelement_vperp=4::Int64,
-    Lvpa=6.0::Float64, Lvperp=3.0::Float64,
+    ngrid::Int64=3, nelement_vpa::Int64=8, nelement_vperp::Int64=4,
+    Lvpa::Float64=6.0, Lvperp::Float64=3.0,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::BoundaryConditionType,
-    bc_vperp=natural_boundary_condition::BoundaryConditionType,
+    bc_vpa::Tbc_vpa=natural_boundary_condition,
+    bc_vperp::Tbc_vperp=natural_boundary_condition,
     # time advance info
-    ntime=1::Int64,delta_t=1.0::Float64,
+    ntime::Int64=1,delta_t::Float64=1.0,
     # nonlinear solver options
-    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
-    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
+    atol::Float64 = 1.0e-10, rtol::Float64 = 0.0,
+    nonlinear_max_iterations::Int64 = 20, test_particle_preconditioner::Bool=true,
     # model options
-    test_linearised_advance=false::Bool,
-    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
-    test_numerical_conserving_terms=false::Bool,
-    test_numerical_conserving_terms_on_C=true::Bool,
-    boundary_data_option=multipole_expansion::boundary_data_type,
-    multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-    test_external_chebyshev_grid=false::Bool,
-    print_diagnostics=true::Bool, print_timing=true::Bool,
-    test_type=interactive_test::CollisionTestReturnType,
+    test_linearised_advance::Bool=false,
+    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner::Bool=false,
+    test_numerical_conserving_terms::Bool=false,
+    test_numerical_conserving_terms_on_C::Bool=true,
+    boundary_data_option::boundary_data_type=multipole_expansion,
+    multi_species_operator_option::multi_species_operator_type=single_assembly_per_species,
+    test_external_chebyshev_grid::Bool=false,
+    print_diagnostics::Bool=true, print_timing::Bool=true,
+    test_type::CollisionTestReturnType=interactive_test,
     # if external user, may pass a slice of an array into functions
-    test_input_array_type=false::Bool)
+    test_input_array_type::Bool=false
+    ) where {Tbc_vpa <: AbstractBoundaryCondition, Tbc_vperp <: AbstractBoundaryCondition}
 
     # number of species
     nspecies = length(zeds)
@@ -241,32 +243,33 @@ end
 include(joinpath(@__DIR__,"SlowingDownTestBase.jl"))
 function test_implicit_slowing_down(;
     # initial pdf info
-    vth0=[0.5]::Vector{Float64}, vperp0=[1.0]::Vector{Float64}, vpa0=[0.0]::Vector{Float64}, zbeam=[0.0]::Vector{Float64},
+    vth0::Vector{Float64}=[0.5], vperp0::Vector{Float64}=[1.0], vpa0::Vector{Float64}=[0.0], zbeam::Vector{Float64}=[0.0],
     # source info
-    source_rate=[1.0]::Vector{Float64}, source_v0=[1.0]::Vector{Float64}, source_vth=[0.05]::Vector{Float64}, sink_rate=[5.0]::Vector{Float64}, sink_vth=0.05::Float64, constant_sink=false::Bool,
+    source_rate::Vector{Float64}=[1.0], source_v0::Vector{Float64}=[1.0], source_vth::Vector{Float64}=[0.05], sink_rate::Vector{Float64}=[5.0], sink_vth::Float64=0.05, constant_sink::Bool=false,
     # species info
-    mass=[1.0]::Vector{Float64}, zeds=[2.0]::Vector{Float64}, c0ref=[1.0]::Vector{Float64},
-    u0ref=[0.0]::Vector{Float64}, n0ref=[1.0]::Vector{Float64}, density_in=[1.0e-8]::Vector{Float64},
+    mass::Vector{Float64}=[1.0], zeds::Vector{Float64}=[2.0], c0ref::Vector{Float64}=[1.0],
+    u0ref::Vector{Float64}=[0.0], n0ref::Vector{Float64}=[1.0], density_in::Vector{Float64}=[1.0e-8],
     # grid info
-    ngrid=5::Int64, nelement_vpa=32::Int64, nelement_vperp=16::Int64,
-    Lvpa=3.0::Float64, Lvperp=1.5::Float64,
+    ngrid::Int64=5, nelement_vpa::Int64=32, nelement_vperp::Int64=16,
+    Lvpa::Float64=3.0, Lvperp::Float64=1.5,
     # boundary condition info
-    bc_vpa=natural_boundary_condition::BoundaryConditionType,
-    bc_vperp=natural_boundary_condition::BoundaryConditionType,
+    bc_vpa::Tbc_vpa=natural_boundary_condition,
+    bc_vperp::Tbc_vperp=natural_boundary_condition,
     # time advance info
-    ntime=1::Int64,delta_t=0.01::Float64,
+    ntime::Int64=1,delta_t::Float64=0.01,
     # nonlinear solver options
-    atol = 1.0e-10::Float64, rtol = 0.0::Float64,
-    nonlinear_max_iterations = 20::Int64, test_particle_preconditioner=true::Bool,
+    atol::Float64 = 1.0e-10, rtol::Float64 = 0.0,
+    nonlinear_max_iterations::Int64 = 20, test_particle_preconditioner::Bool=true,
     # model options
-    electron_mass = 1.0/1836.0::Float64, thermal_temperature = 0.01::Float64,
-    test_linearised_advance=false::Bool,
-    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
-    test_numerical_conserving_terms=true::Bool,
-    test_numerical_conserving_terms_on_C=true::Bool,
-    boundary_data_option=multipole_expansion::boundary_data_type,
-    multi_species_operator_option=single_assembly_per_species::multi_species_operator_type,
-    print_diagnostics=true::Bool, print_timing=true::Bool, print_final_pdf=false::Bool)
+    electron_mass::Float64 = 1.0/1836.0, thermal_temperature::Float64 = 0.01,
+    test_linearised_advance::Bool=false,
+    use_Maxwellian_Rosenbluth_coefficients_in_preconditioner::Bool=false,
+    test_numerical_conserving_terms::Bool=true,
+    test_numerical_conserving_terms_on_C::Bool=true,
+    boundary_data_option::boundary_data_type=multipole_expansion,
+    multi_species_operator_option::multi_species_operator_type=single_assembly_per_species,
+    print_diagnostics::Bool=true, print_timing::Bool=true, print_final_pdf::Bool=false
+    ) where {Tbc_vpa <: AbstractBoundaryCondition, Tbc_vperp <: AbstractBoundaryCondition}
 
     # number of species
     nspecies = length(zeds)

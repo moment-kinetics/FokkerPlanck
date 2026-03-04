@@ -246,7 +246,7 @@ function fokker_planck_cross_species_collision_operator!(
             rosenbluth_potentials, rosenbluth_potentials_buffer,
             fixed_background_plasma,
             rhsvpavperp, lu_obj_MM, YY_arrays, vpa, vperp;
-            use_conserving_corrections=true::Bool
+            use_conserving_corrections::Bool=true
             ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     # calculate the Rosenbluth potentials due to the background plasma
     calculate_cross_species_rosenbluth_potential_sums!(rosenbluth_potentials,
@@ -321,12 +321,12 @@ end
 function fokker_planck_collisions_backward_euler_step!(Fold::Tpdf,
                         delta_t::Float64, nuref::Float64,
                         fkpl_arrays::FokkerPlanckBackwardEulerData;
-                        use_conserving_corrections=true::Bool,
-                        use_conserving_corrections_on_C=true::Bool,
-                        test_linearised_advance=false::Bool,
-                        test_particle_preconditioner=true::Bool,
-                        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner=false::Bool,
-                        update_test_particle_preconditioner=true::Bool) where Tpdf <: AbstractArray{Float64,3}
+                        use_conserving_corrections::Bool=true,
+                        use_conserving_corrections_on_C::Bool=true,
+                        test_linearised_advance::Bool=false,
+                        test_particle_preconditioner::Bool=true,
+                        use_Maxwellian_Rosenbluth_coefficients_in_preconditioner::Bool=false,
+                        update_test_particle_preconditioner::Bool=true) where Tpdf <: AbstractArray{Float64,3}
     CCs = fkpl_arrays.CCs
     source = fkpl_arrays.source
     species = fkpl_arrays.fp_operator.species

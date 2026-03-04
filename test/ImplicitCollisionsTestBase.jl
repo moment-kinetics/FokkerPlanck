@@ -2,7 +2,7 @@ using FokkerPlanck: calculate_entropy_production
 using FiniteElementAssembly: ScalarCoordinateInputs,
                             set_element_boundaries,
                             set_element_scale_and_shift,
-                            FiniteElementCoordinate, BoundaryConditionType,
+                            FiniteElementCoordinate, AbstractBoundaryCondition,
                             include_boundary_points, exclude_lower_boundary_point
 using FokkerPlanck.fokker_planck_calculus: zero_boundary_condition, natural_boundary_condition
 using FokkerPlanck.fokker_planck_test: F_Maxwellian, F_Beam, print_test_data

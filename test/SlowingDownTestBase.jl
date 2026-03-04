@@ -92,7 +92,7 @@ function print_test_data(func_exact::Tpdf1,
                     vperp::FiniteElementCoordinate,
                     dummy::Tpdf2,
                     v_max::Float64, v_min::Float64;
-                    print_to_screen=true::Bool
+                    print_to_screen::Bool=true
                     ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     @. func_err = 0.0
     @. dummy = 0.0
@@ -144,7 +144,7 @@ function diagnose_F_SD!(sd_errors::SD_error_data,sd_pdf::Tpdf1,
     Fdummy2::Tpdf2, Fdummy3::Tpdf2,
     source_v0::Vector{Float64}, vth_ion::Float64,
     vpa::FiniteElementCoordinate, vperp::FiniteElementCoordinate, species::SpeciesData;
-    print_to_screen=true::Bool) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,2}} 
+    print_to_screen::Bool=true) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,2}}
     @. Fdummy1 = 0.0
     for is in 1:species.n
         vmax = 1.1*source_v0[is]
