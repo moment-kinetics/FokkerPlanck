@@ -227,6 +227,7 @@ function test_multispecies_implicit_collisions(;
         # print_grid(vpa)
         # print_grid(vperp)
         # print_pdf(Fout)
+        # print_moments(moments)
         return pdf_and_grid(vpa.grid,vperp.grid,Fout,moments)
     elseif test_type == timing_test
         return init_time, run_time

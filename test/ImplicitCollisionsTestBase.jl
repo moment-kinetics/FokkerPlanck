@@ -263,16 +263,21 @@ function set_initial_pdf!(Fold::Tpdf,
     return nothing
 end
 
-function print_grid(coord)
-    println("# Expected "*coord.name)
+function print_vector(x::Vector{Float64})
     print("[")
-    for k in 1:coord.n
-        @printf("%.15f", coord.grid[k])
-        if k < coord.n
+    for k in eachindex(x)
+        @printf("%.15f", x[k])
+        if k < length(x)
             print(", ")
         end
     end
     print("],\n")
+    return nothing
+end
+
+function print_grid(coord)
+    println("# Expected "*coord.name)
+    print_vector(coord.grid)
     return nothing
 end
 
@@ -302,6 +307,31 @@ function print_pdf(pdf::Tpdf) where Tpdf <: AbstractArray{Float64,4}
         end
     end
     print("]\n")
+    return nothing
+end
+
+function print_moments(moments::moments_struct)
+    println("# Expected moments")
+    println("# Expected density")
+    print_vector(moments.density)
+    println("# Expected upar")
+    print_vector(moments.upar)
+    println("# Expected vth")
+    print_vector(moments.vth)
+    println("# Expected pressure")
+    print_vector(moments.pressure)
+    println("# Expected temperature")
+    print_vector(moments.temperature)
+    println("# Expected ppar")
+    print_vector(moments.ppar)
+    println("# Expected qpar")
+    print_vector(moments.qpar)
+    println("# Expected rmom")
+    print_vector(moments.rmom)
+    println("# Expected conserved0")
+    print_vector(moments.conserved0)
+    println("# Expected conserved")
+    print_vector(moments.conserved)
     return nothing
 end
 
