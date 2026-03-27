@@ -20,20 +20,22 @@ struct moments_struct
     ppar::Vector{Float64}
     qpar::Vector{Float64}
     rmom::Vector{Float64}
+    conserved0::Vector{Float64}
     conserved::Vector{Float64}
-    function moments_struct(nspecies::Int64)
-        density = Array{Float64}(undef,nspecies)
-        upar = Array{Float64}(undef,nspecies)
-        vth = Array{Float64}(undef,nspecies)
-        pressure = Array{Float64}(undef,nspecies)
-        temperature = Array{Float64}(undef,nspecies)
-        ppar = Array{Float64}(undef,nspecies)
-        qpar = Array{Float64}(undef,nspecies)
-        rmom = Array{Float64}(undef,nspecies)
-        conserved = Array{Float64}(undef,nspecies+2)
-        return new(density, upar, vth, pressure,
-            temperature, ppar, qpar, rmom, conserved)
-    end
+end
+function moments_struct(nspecies::Int64)
+    density = Array{Float64}(undef,nspecies)
+    upar = Array{Float64}(undef,nspecies)
+    vth = Array{Float64}(undef,nspecies)
+    pressure = Array{Float64}(undef,nspecies)
+    temperature = Array{Float64}(undef,nspecies)
+    ppar = Array{Float64}(undef,nspecies)
+    qpar = Array{Float64}(undef,nspecies)
+    rmom = Array{Float64}(undef,nspecies)
+    conserved0 = Array{Float64}(undef,nspecies+2)
+    conserved = Array{Float64}(undef,nspecies+2)
+    return moments_struct(density, upar, vth, pressure,
+        temperature, ppar, qpar, rmom, conserved0, conserved)
 end
 
 function calculate_total_parallel_momentum(moments::moments_struct,species::SpeciesData)
@@ -96,7 +98,7 @@ function diagnose_F_Maxwellian(CC::Tpdf1, pdf::Tpdf2, pdf_exact::Tpdf3,
                     pdf_dummy_1::Tpdf4, pdf_dummy_2::Tpdf5,
                     fkpl_arrays::FokkerPlanckWeakformArrays,
                     moments::moments_struct,
-                    time::Float64, it::Int64; updated_CC=true
+                    time::Float64, it::Int64; updated_CC::Bool=true, print_diagnostics::Bool=false
                     ) where {Tpdf1 <: AbstractArray{Float64,3},Tpdf2 <: AbstractArray{Float64,3},
                     Tpdf3 <: AbstractArray{Float64,3}, Tpdf4 <: AbstractArray{Float64,2},
                     Tpdf5 <: AbstractArray{Float64,2}}
@@ -128,9 +130,11 @@ function diagnose_F_Maxwellian(CC::Tpdf1, pdf::Tpdf2, pdf_exact::Tpdf3,
             end
         end
     end
-    println("it = ", it, " time: ", time)
-    for is in 1:species.n
-        @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]_Maxwellian",vpa,vperp,pdf_dummy_2;print_to_screen=true)
+    if print_diagnostics
+        println("it = ", it, " time: ", time)
+        for is in 1:species.n
+            @views print_test_data(pdf_exact[:,:,is],pdf[:,:,is],pdf_dummy_1,"F[$is]_Maxwellian",vpa,vperp,pdf_dummy_2;print_to_screen=true)
+        end
     end
     # println("upar: ", moments.upar)
     # println("vth: ", moments.vth)
@@ -142,33 +146,39 @@ function diagnose_F_Maxwellian(CC::Tpdf1, pdf::Tpdf2, pdf_exact::Tpdf3,
     dSdt = calculate_entropy_production(CC,pdf,fkpl_arrays)
     delta_momentum_C, delta_energy_C = calculate_total_change(CC,fkpl_arrays)
     if it == 0
-        # store conserved quantities
-        moments.conserved[1:species.n] .= moments.density
-        moments.conserved[species.n+1] = total_parallel_momentum
-        moments.conserved[species.n+2] = total_energy
+        # store conserved quantities from the initial time
+        moments.conserved0[1:species.n] .= moments.density
+        moments.conserved0[species.n+1] = total_parallel_momentum
+        moments.conserved0[species.n+2] = total_energy
     end
-    println("dens: ", moments.density)
-    println("upar: ", moments.upar)
-    println("temp: ", moments.temperature)
-    println("parallel momentum: ", total_parallel_momentum)
-    println("total energy: ", total_energy)
-    println("delta density: ", moments.density .- moments.conserved[1:species.n])
-    println("delta momentum: ", total_parallel_momentum - moments.conserved[species.n+1])
-    println("delta energy: ", total_energy - moments.conserved[species.n+2])
-    if updated_CC
-        println("dSdt: ", dSdt)
-        println("delta_momentum_C: ",delta_momentum_C)
-        println("delta_energy_C: ", delta_energy_C)
-    end
-    if vpa.bc == zero_boundary_condition
-        for is in 1:species.n
-            println("test vpa bc: F[1, :, $is]", pdf[1, :, is])
-            println("test vpa bc: F[end, :, $is]", pdf[end, :, is])
+    # store conserved quantities
+    moments.conserved[1:species.n] .= moments.density
+    moments.conserved[species.n+1] = total_parallel_momentum
+    moments.conserved[species.n+2] = total_energy
+    if print_diagnostics
+        println("dens: ", moments.density)
+        println("upar: ", moments.upar)
+        println("temp: ", moments.temperature)
+        println("parallel momentum: ", total_parallel_momentum)
+        println("total energy: ", total_energy)
+        println("delta density: ", moments.conserved[1:species.n] .- moments.conserved0[1:species.n])
+        println("delta momentum: ", moments.conserved[species.n+1] - moments.conserved0[species.n+1])
+        println("delta energy: ", moments.conserved[species.n+2] - moments.conserved0[species.n+2])
+        if updated_CC
+            println("dSdt: ", dSdt)
+            println("delta_momentum_C: ",delta_momentum_C)
+            println("delta_energy_C: ", delta_energy_C)
         end
-    end
-    if vperp.bc == zero_boundary_condition
-        for is in 1:species.n
-            println("test vperp bc: F[:, end, $is]", pdf[:, end, is])
+        if vpa.bc == zero_boundary_condition
+            for is in 1:species.n
+                println("test vpa bc: F[1, :, $is]", pdf[1, :, is])
+                println("test vpa bc: F[end, :, $is]", pdf[end, :, is])
+            end
+        end
+        if vperp.bc == zero_boundary_condition
+            for is in 1:species.n
+                println("test vperp bc: F[:, end, $is]", pdf[:, end, is])
+            end
         end
     end
 end
@@ -299,4 +309,5 @@ struct pdf_and_grid
     vpa_grid::Vector{Float64}
     vperp_grid::Vector{Float64}
     pdf::Array{Float64,4}
+    moments::moments_struct
 end

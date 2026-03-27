@@ -268,8 +268,9 @@ end
 """
 Function to calculate entropy production.
 """
-function calculate_entropy_production(CC::Tpdf, pdf::Tpdf,
-            fkpl_arrays::FokkerPlanckWeakformArrays) where Tpdf <: AbstractArray{Float64,2}
+function calculate_entropy_production(CC::Tpdf1, pdf::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays
+            ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # assign dummy array
@@ -284,8 +285,9 @@ function calculate_entropy_production(CC::Tpdf, pdf::Tpdf,
     dSdt = -get_density(lnfC,vpa,vperp)
     return dSdt
 end
-function calculate_entropy_production(CCs::Tpdf, pdf::Tpdf,
-            fkpl_arrays::FokkerPlanckWeakformArrays) where Tpdf <: AbstractArray{Float64,3}
+function calculate_entropy_production(CCs::Tpdf1, pdf::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays
+            ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
