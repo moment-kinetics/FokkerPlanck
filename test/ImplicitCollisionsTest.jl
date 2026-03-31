@@ -183,10 +183,8 @@ function test_multispecies_implicit_collisions(;
     # get initial C[F,F] for entropy production diagnostic
     fokker_planck_collision_operator_weak_form!(CC, Fold, nuss, fkpl_arrays.fp_operator,
             use_conserving_corrections=test_numerical_conserving_terms_on_C)
-    # print diagnostic info to screen
-    if print_diagnostics
-        diagnose_F_Maxwellian(CC, Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,0)
-    end
+    # print diagnostic info to screen, calculate moments
+    diagnose_F_Maxwellian(CC, Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,0,print_diagnostics=print_diagnostics)
     finish_init_time = now()
     # time advance with backward Euler
     for it in 1:ntime
@@ -210,9 +208,7 @@ function test_multispecies_implicit_collisions(;
         end
         # diagnose the updated Fold
         time += delta_t
-        if print_diagnostics
-            diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,it)
-        end
+        diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,it,print_diagnostics=print_diagnostics)
     end
     finish_run_time = now()
     # store final pdf for output
@@ -231,7 +227,8 @@ function test_multispecies_implicit_collisions(;
         # print_grid(vpa)
         # print_grid(vperp)
         # print_pdf(Fout)
-        return pdf_and_grid(vpa.grid,vperp.grid,Fout)
+        # print_moments(moments)
+        return pdf_and_grid(vpa.grid,vperp.grid,Fout,moments)
     elseif test_type == timing_test
         return init_time, run_time
     else # interactive_test
@@ -346,10 +343,8 @@ function test_implicit_slowing_down(;
     sd_pdf = slowing_down_pdf(vpa, vperp, species, source_rate, source_v0, source_vth,
         msp, Zsp, denssp, vthsp, nuref)
     sd_errors = SD_error_data(species.n)
-    # print diagnostic info to screen
-    if print_diagnostics
-        diagnose_F_Maxwellian(CC, Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,0)
-    end
+    # print diagnostic info to screen, calculate moments
+    diagnose_F_Maxwellian(CC, Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,0,print_diagnostics=print_diagnostics)
     diagnose_F_SD!(sd_errors, sd_pdf, Fold, Fdummy1, Fdummy2, Fdummy3,
         source_v0, vthsp[2], vpa, vperp, species,
         print_to_screen=print_diagnostics)
@@ -383,9 +378,7 @@ function test_implicit_slowing_down(;
         end
         # diagnose the updated Fold
         time += delta_t
-        if print_diagnostics
-            diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,it,updated_CC=!test_linearised_advance)
-        end
+        diagnose_F_Maxwellian(CC,Fold,Fdummy1,Fdummy2,Fdummy3,fkpl_arrays.fp_operator,moments,time,it,updated_CC=!test_linearised_advance,print_diagnostics=print_diagnostics)
         diagnose_F_SD!(sd_errors, sd_pdf, Fold, Fdummy1, Fdummy2, Fdummy3,
             source_v0, vthsp[2], vpa, vperp, species,
             print_to_screen=print_diagnostics)
@@ -404,7 +397,7 @@ function test_implicit_slowing_down(;
     # print_grid(vpa)
     # print_grid(vperp)
     # print_pdf(Fout)
-    pdfandgrid = pdf_and_grid(vpa.grid,vperp.grid,Fout)
+    pdfandgrid = pdf_and_grid(vpa.grid,vperp.grid,Fout,moments)
     if print_final_pdf
         for is in 1:species.n
             v0 = source_v0[is]

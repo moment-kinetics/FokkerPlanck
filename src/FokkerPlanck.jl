@@ -28,7 +28,6 @@ module FokkerPlanck
 # be defined
 include("velocity_moments.jl")
 include("fokker_planck_test.jl")
-include("fokker_planck_nonlinear_solvers.jl")
 include("fokker_planck_calculus.jl")
 
 export fokker_planck_collision_operator_weak_form!
@@ -269,8 +268,9 @@ end
 """
 Function to calculate entropy production.
 """
-function calculate_entropy_production(CC::Tpdf, pdf::Tpdf,
-            fkpl_arrays::FokkerPlanckWeakformArrays) where Tpdf <: AbstractArray{Float64,2}
+function calculate_entropy_production(CC::Tpdf1, pdf::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays
+            ) where {Tpdf1 <: AbstractArray{Float64,2}, Tpdf2 <: AbstractArray{Float64,2}}
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     # assign dummy array
@@ -285,8 +285,9 @@ function calculate_entropy_production(CC::Tpdf, pdf::Tpdf,
     dSdt = -get_density(lnfC,vpa,vperp)
     return dSdt
 end
-function calculate_entropy_production(CCs::Tpdf, pdf::Tpdf,
-            fkpl_arrays::FokkerPlanckWeakformArrays) where Tpdf <: AbstractArray{Float64,3}
+function calculate_entropy_production(CCs::Tpdf1, pdf::Tpdf2,
+            fkpl_arrays::FokkerPlanckWeakformArrays
+            ) where {Tpdf1 <: AbstractArray{Float64,3}, Tpdf2 <: AbstractArray{Float64,3}}
     vpa = fkpl_arrays.vpa
     vperp = fkpl_arrays.vperp
     species = fkpl_arrays.species
@@ -336,7 +337,9 @@ function fokker_planck_collisions_backward_euler_step!(Fold::Tpdf,
     source_data = fkpl_arrays.source_data
     # residual function to be used for Newton-Krylov
     # residual(vpa, vperp, species) = F^(n+1) - F^n - dt * C[F^n+1,F^n+1]
-    function residual_func!(Fresidual, Fnew; krylov=false)
+    function residual_func!(Fresidualc, Fnewc; krylov=false)
+        Fnew = reshape(Fnewc,(vpa.n,vperp.n,species.n))
+        Fresidual = reshape(Fresidualc,(vpa.n,vperp.n,species.n))
         fokker_planck_collision_operator_weak_form!(CCs,
                         Fnew, nuref,
                         fkpl_arrays.fp_operator;
@@ -372,7 +375,7 @@ function fokker_planck_collisions_backward_euler_step!(Fold::Tpdf,
             # let K * dF = C[dF,F^n]
             # function to solve K * F^n+1 = M * F^n
             # and return F^n+1 in place in x
-            pdf = x
+            pdf = reshape(x,(vpa.n,vperp.n,species.n))
             advance_linearised_test_particle_collisions!(pdf,fkpl_arrays)
             return nothing
         end
@@ -392,20 +395,15 @@ function fokker_planck_collisions_backward_euler_step!(Fold::Tpdf,
         end
     end
     if test_linearised_advance
-        add_slowing_down_source!(Fnew, fkpl_arrays.Fsw,
+        add_slowing_down_source!(Fnew, source,
             fkpl_arrays.fp_operator, source_data, delta_t)
-        test_particle_precon!(Fnew)
+        test_particle_precon!(vec(fkpl_arrays.Fs_new))
         success = true
     else
         nl_solver_params = fkpl_arrays.nl_solver_data_s
-        Fresidual = fkpl_arrays.Fs_residual
-        F_delta_x = fkpl_arrays.Fs_delta_x
-        F_rhs_delta = fkpl_arrays.Fs_rhs_delta
-        Fv = fkpl_arrays.Fsv
-        Fw = fkpl_arrays.Fsw
-        success = newton_solve!(Fnew, residual_func!,
-                        Fresidual, F_delta_x, F_rhs_delta, Fv, Fw, nl_solver_params;
+        success = newton_solve!(vec(fkpl_arrays.Fs_new), residual_func!, nl_solver_params;
                         right_preconditioner=right_preconditioner)
+        Fnew = fkpl_arrays.Fs_new
         # apply BCs on result, if non-natural BCs are imposed
         for is in 1:species.n
             @views enforce_vpavperp_BCs!(Fnew[:,:,is],vpa,vperp)
