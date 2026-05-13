@@ -1,7 +1,7 @@
 # Based on example from https://github.com/julia-actions/julia-runtest
 name: Run plotting scripts
 
-on: [pull_request, workflow_dispatch]
+on: [push, workflow_dispatch]
 #on: [pull_request]
 
 permissions:
