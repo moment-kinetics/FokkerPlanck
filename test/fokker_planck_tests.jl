@@ -1266,6 +1266,52 @@ function rosenbluth_potential_solver_test(;
     @test d2Gdvperpdvpa_M_L2 < atol_L2_d2Gdvperpdvpa
     @test d2Gdvperp2_M_max < atol_max_d2Gdvperp2
     @test d2Gdvperp2_M_L2 < atol_L2_d2Gdvperp2
+
+    # calculate the potentials through an analytical specification
+    calculate_rosenbluth_potentials_via_analytical_Maxwellian!(
+        fkpl_arrays.rosenbluth_potentials, F_M, vpa, vperp, species.mass[1])
+    @inbounds begin
+        for ivperp in 1:vperp.n
+            for ivpa in 1:vpa.n
+            G_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.GG[ivpa,ivperp]
+            H_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.HH[ivpa,ivperp]
+            dHdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvpa[ivpa,ivperp]
+            dHdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dHdvperp[ivpa,ivperp]
+            dGdvperp_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.dGdvperp[ivpa,ivperp]
+            d2Gdvperp2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperp2[ivpa,ivperp]
+            d2Gdvpa2_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvpa2[ivpa,ivperp]
+            d2Gdvperpdvpa_M_num[ivpa,ivperp] = fkpl_arrays.rosenbluth_potentials.d2Gdvperpdvpa[ivpa,ivperp]
+            end
+        end
+    end
+    # test the elliptic solvers
+    H_M_max, H_M_L2 = print_test_data(H_M_exact,H_M_num,H_M_err,"H_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dHdvpa_M_max, dHdvpa_M_L2 = print_test_data(dHdvpa_M_exact,dHdvpa_M_num,dHdvpa_M_err,"dHdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dHdvperp_M_max, dHdvperp_M_L2 = print_test_data(dHdvperp_M_exact,dHdvperp_M_num,dHdvperp_M_err,"dHdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    G_M_max, G_M_L2 = print_test_data(G_M_exact,G_M_num,G_M_err,"G_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvpa2_M_max, d2Gdvpa2_M_L2 = print_test_data(d2Gdvpa2_M_exact,d2Gdvpa2_M_num,d2Gdvpa2_M_err,"d2Gdvpa2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    dGdvperp_M_max, dGdvperp_M_L2 = print_test_data(dGdvperp_M_exact,dGdvperp_M_num,dGdvperp_M_err,"dGdvperp_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvperpdvpa_M_max, d2Gdvperpdvpa_M_L2 = print_test_data(d2Gdvperpdvpa_M_exact,d2Gdvperpdvpa_M_num,d2Gdvperpdvpa_M_err,"d2Gdvperpdvpa_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    d2Gdvperp2_M_max, d2Gdvperp2_M_L2 = print_test_data(d2Gdvperp2_M_exact,d2Gdvperp2_M_num,d2Gdvperp2_M_err,"d2Gdvperp2_M",vpa,vperp,dummy_array,print_to_screen=print_to_screen)
+    # the errors should be small
+    atol_max = 5.0e-11
+    atol_L2 = 1.0e-11
+    @test H_M_max < atol_max
+    @test H_M_L2 < atol_L2
+    @test dHdvpa_M_max < atol_max
+    @test dHdvpa_M_L2 < atol_L2
+    @test dHdvperp_M_max < atol_max
+    @test dHdvperp_M_L2 < atol_L2
+    @test G_M_max < atol_max
+    @test G_M_L2 < atol_L2
+    @test d2Gdvpa2_M_max < atol_max
+    @test d2Gdvpa2_M_L2 < atol_L2
+    @test dGdvperp_M_max < atol_max
+    @test dGdvperp_M_L2 < atol_L2
+    @test d2Gdvperpdvpa_M_max < atol_max
+    @test d2Gdvperpdvpa_M_L2 < atol_L2
+    @test d2Gdvperp2_M_max < atol_max
+    @test d2Gdvperp2_M_L2 < atol_L2
     return nothing
 end
 function runtests()
